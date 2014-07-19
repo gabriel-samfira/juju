@@ -53,12 +53,15 @@ func testConfig(c *gc.C, stateServer bool, vers version.Binary) *config.Config {
 
 func (s *configureSuite) getCloudConfig(c *gc.C, stateServer bool, vers version.Binary) *cloudinit.Config {
 	var mcfg *envcloudinit.MachineConfig
+	var err error
 	if stateServer {
-		mcfg = environs.NewBootstrapMachineConfig("private-key")
+		mcfg, err = environs.NewBootstrapMachineConfig("private-key", vers.Series)
+		c.Assert(err, gc.IsNil)
 		mcfg.InstanceId = "instance-id"
 		mcfg.Jobs = []params.MachineJob{params.JobManageEnviron, params.JobHostUnits}
 	} else {
-		mcfg = environs.NewMachineConfig("0", "ya", nil, nil, nil)
+		mcfg, err = environs.NewMachineConfig("0", "ya", nil, nil, nil, vers.Series)
+		c.Assert(err, gc.IsNil)
 		mcfg.Jobs = []params.MachineJob{params.JobHostUnits}
 	}
 	mcfg.Tools = &tools.Tools{
@@ -66,10 +69,12 @@ func (s *configureSuite) getCloudConfig(c *gc.C, stateServer bool, vers version.
 		URL:     "file:///var/lib/juju/storage/" + envtools.StorageName(vers),
 	}
 	environConfig := testConfig(c, stateServer, vers)
-	err := environs.FinishMachineConfig(mcfg, environConfig, constraints.Value{})
+	err = environs.FinishMachineConfig(mcfg, environConfig, constraints.Value{})
 	c.Assert(err, gc.IsNil)
 	cloudcfg := cloudinit.New()
-	err = envcloudinit.Configure(mcfg, cloudcfg)
+	udata, err := envcloudinit.NewUserdataConfig(mcfg, cloudcfg)
+	c.Assert(err, gc.IsNil)
+	err = udata.Configure()
 	c.Assert(err, gc.IsNil)
 	return cloudcfg
 }

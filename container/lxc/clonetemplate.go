@@ -67,7 +67,12 @@ func templateUserData(
 			utils.ShQuote(templateShutdownUpstartScript),
 			templateShutdownUpstartFilename,
 		))
-	data, err := config.Render()
+
+	renderer, err := coreCloudinit.NewRenderer(series)
+	if err != nil {
+		return nil, err
+	}
+	data, err := renderer.Render(config)
 	if err != nil {
 		return nil, err
 	}

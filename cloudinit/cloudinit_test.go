@@ -295,7 +295,9 @@ func (S) TestOutput(c *gc.C) {
 	for _, t := range ctests {
 		cfg := cloudinit.New()
 		t.setOption(cfg)
-		data, err := cfg.Render()
+		render, err := cloudinit.NewRenderer("quantal")
+		c.Assert(err, gc.IsNil)
+		data, err := render.Render(cfg)
 		c.Assert(err, gc.IsNil)
 		c.Assert(data, gc.NotNil)
 		c.Assert(string(data), gc.Equals, header+t.expect, gc.Commentf("test %q output differs", t.name))
@@ -364,7 +366,12 @@ func ExampleConfig() {
 	cfg := cloudinit.New()
 	cfg.AddPackage("juju")
 	cfg.AddPackage("ubuntu")
-	data, err := cfg.Render()
+	render, err := cloudinit.NewRenderer("quantal")
+	if err != nil {
+		fmt.Printf("render error: %v", err)
+		return
+	}
+	data, err := render.Render(cfg)
 	if err != nil {
 		fmt.Printf("render error: %v", err)
 		return

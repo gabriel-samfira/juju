@@ -542,7 +542,10 @@ func (task *provisionerTask) provisioningInfo(machine *apiprovisioner.Machine) (
 		return nil, err
 	}
 	nonce := fmt.Sprintf("%s:%s", task.machineTag, uuid)
-	machineConfig := environs.NewMachineConfig(machine.Id(), nonce, pInfo.Networks, stateInfo, apiInfo)
+	machineConfig, err := environs.NewMachineConfig(machine.Id(), nonce, pInfo.Networks, stateInfo, apiInfo, pInfo.Series)
+	if err != nil {
+		return nil, err
+	}
 	if len(pInfo.Jobs) > 0 {
 		machineConfig.Jobs = pInfo.Jobs
 	}

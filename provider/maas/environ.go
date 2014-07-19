@@ -32,6 +32,7 @@ import (
 	"github.com/juju/juju/network"
 	"github.com/juju/juju/provider/common"
 	"github.com/juju/juju/tools"
+	"github.com/juju/juju/version"
 )
 
 const (
@@ -471,7 +472,9 @@ func (environ *maasEnviron) StartInstance(args environs.StartInstanceParams) (
 	args.MachineConfig.AgentEnvironment[agent.LxcBridge] = "br0"
 
 	iface := environ.ecfg().networkBridge()
-	cloudcfg, err := newCloudinitConfig(hostname, iface)
+	series := args.Tools.OneSeries()
+
+	cloudcfg, err := newCloudinitConfig(hostname, iface, series)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -482,7 +485,6 @@ func (environ *maasEnviron) StartInstance(args environs.StartInstanceParams) (
 	}
 	logger.Debugf("maas user data; %d bytes", len(userdata))
 
-	series := args.Tools.OneSeries()
 	if err := environ.startNode(*inst.maasObject, series, userdata); err != nil {
 		return nil, nil, nil, err
 	}
@@ -493,25 +495,37 @@ func (environ *maasEnviron) StartInstance(args environs.StartInstanceParams) (
 
 // newCloudinitConfig creates a cloudinit.Config structure
 // suitable as a base for initialising a MAAS node.
-func newCloudinitConfig(hostname string, iface string) (*cloudinit.Config, error) {
+func newCloudinitConfig(hostname, iface, series string) (*cloudinit.Config, error) {
 	info := machineInfo{hostname}
-	runCmd, err := info.cloudinitRunCmd()
+	runCmd, err := info.cloudinitRunCmd(series)
 
 	if err != nil {
 		return nil, err
 	}
 
 	cloudcfg := cloudinit.New()
-	cloudcfg.SetAptUpdate(true)
-	cloudcfg.AddPackage("bridge-utils")
-	cloudcfg.AddScripts(
-		"set -xe",
-		runCmd,
-		fmt.Sprintf("ifdown %s", iface),
-		restoreInterfacesFiles(iface),
-		createBridgeNetwork(iface),
-		"ifup br0",
-	)
+	operatingSystem, err := version.GetOSFromSeries(series)
+	if err != nil {
+		return nil, err
+	}
+
+	switch operatingSystem {
+	case version.Windows:
+		cloudcfg.AddScripts(
+			runCmd,
+		)
+	case version.Ubuntu:
+		cloudcfg.SetAptUpdate(true)
+		cloudcfg.AddPackage("bridge-utils")
+		cloudcfg.AddScripts(
+			"set -xe",
+			runCmd,
+			fmt.Sprintf("ifdown %s", iface),
+			restoreInterfacesFiles(iface),
+			createBridgeNetwork(iface),
+			"ifup br0",
+		)
+	}
 	return cloudcfg, nil
 }
 
