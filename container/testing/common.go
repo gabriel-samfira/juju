@@ -20,13 +20,14 @@ import (
 func CreateContainer(c *gc.C, manager container.Manager, machineId string) instance.Instance {
 	stateInfo := jujutesting.FakeStateInfo(machineId)
 	apiInfo := jujutesting.FakeAPIInfo(machineId)
-	machineConfig := environs.NewMachineConfig(machineId, "fake-nonce", nil, stateInfo, apiInfo)
+	machineConfig, err := environs.NewMachineConfig(machineId, "fake-nonce", nil, stateInfo, apiInfo, "quantal")
+	c.Assert(err, gc.IsNil)
 	machineConfig.Tools = &tools.Tools{
 		Version: version.MustParseBinary("2.3.4-quantal-amd64"),
 		URL:     "http://tools.testing.invalid/2.3.4-quantal-amd64.tgz",
 	}
 
-	series := "series"
+	series := "quantal"
 	network := container.BridgeNetworkConfig("nic42")
 	inst, hardware, err := manager.CreateContainer(machineConfig, series, network)
 	c.Assert(err, gc.IsNil)

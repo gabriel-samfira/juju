@@ -38,6 +38,7 @@ func makeMachineConfig(c *gc.C) *cloudinit.MachineConfig {
 		Jobs:               []params.MachineJob{params.JobManageEnviron, params.JobHostUnits},
 		CloudInitOutputLog: environs.CloudInitOutputLog,
 		Tools:              &tools.Tools{URL: "file://" + c.MkDir()},
+		Series:             "quantal",
 		MongoInfo: &authentication.MongoInfo{
 			Info: mongo.Info{
 				CACert: testing.CACert,
@@ -59,7 +60,7 @@ func makeMachineConfig(c *gc.C) *cloudinit.MachineConfig {
 // will reject as invalid.
 func makeBadMachineConfig() *cloudinit.MachineConfig {
 	// As it happens, a default-initialized config is invalid.
-	return &cloudinit.MachineConfig{}
+	return &cloudinit.MachineConfig{Series: "quantal"}
 }
 
 func (*customDataSuite) TestMakeCustomDataPropagatesError(c *gc.C) {

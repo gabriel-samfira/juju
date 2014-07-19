@@ -84,7 +84,8 @@ func createContainer(c *gc.C, manager container.Manager, machineId string) insta
 	machineNonce := "fake-nonce"
 	stateInfo := jujutesting.FakeStateInfo(machineId)
 	apiInfo := jujutesting.FakeAPIInfo(machineId)
-	machineConfig := environs.NewMachineConfig(machineId, machineNonce, nil, stateInfo, apiInfo)
+	machineConfig, err := environs.NewMachineConfig(machineId, machineNonce, nil, stateInfo, apiInfo, "precise")
+	c.Assert(err, gc.IsNil)
 	network := container.BridgeNetworkConfig("virbr0")
 
 	machineConfig.Tools = &tools.Tools{
@@ -92,7 +93,7 @@ func createContainer(c *gc.C, manager container.Manager, machineId string) insta
 		URL:     "http://tools.testing.invalid/2.3.4-foo-bar.tgz",
 	}
 	environConfig := dummyConfig(c)
-	err := environs.FinishMachineConfig(machineConfig, environConfig, constraints.Value{})
+	err = environs.FinishMachineConfig(machineConfig, environConfig, constraints.Value{})
 	c.Assert(err, gc.IsNil)
 
 	inst, hardware, err := manager.CreateContainer(machineConfig, "precise", network)

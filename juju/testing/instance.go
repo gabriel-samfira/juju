@@ -165,10 +165,13 @@ func StartInstanceWithParams(
 	machineNonce := "fake_nonce"
 	stateInfo := FakeStateInfo(machineId)
 	apiInfo := FakeAPIInfo(machineId)
-	machineConfig := environs.NewMachineConfig(
+	machineConfig, err := environs.NewMachineConfig(
 		machineId, machineNonce,
 		networks,
-		stateInfo, apiInfo)
+		stateInfo, apiInfo, series)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	params.Tools = possibleTools
 	params.MachineConfig = machineConfig
 	return env.StartInstance(params)
