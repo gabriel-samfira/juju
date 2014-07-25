@@ -1,4 +1,4 @@
-package cloudinit
+package cloudinit_test
 
 var WindowsUserdata = `#ps1_sysnative
 
@@ -833,7 +833,6 @@ datadir: C:/Juju/lib/juju
 logdir: C:/Juju/log/juju
 nonce: FAKE_NONCE
 jobs:
-- JobManageEnviron
 - JobHostUnits
 upgradedToVersion: 1.21-alpha1
 cacert: 'CA CERT
