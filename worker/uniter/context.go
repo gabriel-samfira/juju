@@ -239,7 +239,7 @@ func (ctx *HookContext) windowsEnv(charmDir, toolsDir string) []string {
 	charmModules := filepath.Join(charmDir, "Modules")
 	hookModules := filepath.Join(charmDir, "hooks", "Modules")
 	env := []string{
-		"Path=" + toolsDir + ";" + os.Getenv("Path"),
+		"Path=" + filepath.FromSlash(toolsDir) + ";" + os.Getenv("Path"),
 		"PSModulePath=" + os.Getenv("PSModulePath") + ";" + charmModules + ";" + hookModules,
 	}
 	return mergeEnvironment(env)
