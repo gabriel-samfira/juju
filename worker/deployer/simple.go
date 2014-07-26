@@ -135,7 +135,7 @@ func (ctx *SimpleContext) DeployUnit(unitName, initialPassword string) (err erro
 
 	// Install an upstart job that runs the unit agent.
 	cmd := strings.Join([]string{
-		path.Join(toolsDir, jujunames.Jujud), "unit",
+		filepath.FromSlash(path.Join(toolsDir, jujunames.Jujud)), "unit",
 		"--data-dir", dataDir,
 		"--unit-name", unitName,
 		"--debug", // TODO: propagate debug state sensibly
