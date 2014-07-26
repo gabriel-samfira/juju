@@ -21,6 +21,7 @@ github.com/juju/txn	git	ee0346875f2ae9a21442f3ff64409f750f37afbc
 github.com/juju/utils	git	23a020e65114b12dca8a500a49b38dd6fdb7b6c2	
 gopkg.in/natefinch/npipe.v2	git	6228fd0f31f2ea07d7aad84ee64e0e40266027de	
 gopkg.in/mgo.v2	git	dc255bb679efa273b6544a03261c4053505498a4	
+gopkg.in/natefinch/lumberjack.v2	git	8b224001f48147e99771296db571564c20847f2d	
 launchpad.net/gnuflag	bzr	roger.peppe@canonical.com-20140716064605-pk32dnmfust02yab	13
 launchpad.net/goamz	bzr	ian.booth@canonical.com-20140708164959-72q70lo1du0e4qki	48
 launchpad.net/gocheck	bzr	gustavo@niemeyer.net-20140225173054-xu9zlkf9kxhvow02	87

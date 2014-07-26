@@ -14,13 +14,12 @@ import (
 
 	"github.com/juju/juju/agent/tools"
 	"github.com/juju/juju/cloudinit"
-	jujunames "github.com/juju/juju/juju/names"
 	"github.com/juju/juju/juju/paths"
 )
 
 type windowsConfigure struct {
-	mcfg   *MachineConfig
-	conf   *cloudinit.Config
+	mcfg     *MachineConfig
+	conf     *cloudinit.Config
 	renderer cloudinit.Renderer
 }
 
@@ -113,7 +112,7 @@ func (w *windowsConfigure) ConfigureJuju() error {
 // machineAgentWindowsService returns the powershell command for a machine agent service
 // based on the tag and machineId passed in.
 func (w *windowsConfigure) machineAgentWindowsService(name, toolsDir string) []string {
-	jujud := filepath.Join(toolsDir, jujunames.Jujud)
+	jujud := filepath.Join(toolsDir, "jujud.exe")
 
 	serviceString := fmt.Sprintf(`"%s" machine --data-dir "%s" --machine-id "%s" --debug`,
 		w.renderer.FromSlash(jujud),
@@ -135,7 +134,7 @@ func (w *windowsConfigure) addMachineAgentToBoot(tag string) error {
 	toolsDir := tools.ToolsDir(w.mcfg.DataDir, tag)
 	w.conf.AddScripts(
 		fmt.Sprintf(
-			`cmd.exe /C mklink %s %v`,
+			`cmd.exe /C mklink /D %s %v`,
 			w.renderer.FromSlash(toolsDir),
 			w.mcfg.Tools.Version),
 	)

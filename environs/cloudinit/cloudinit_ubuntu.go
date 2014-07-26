@@ -20,8 +20,8 @@ import (
 )
 
 type ubuntuConfigure struct {
-	mcfg   *MachineConfig
-	conf   *cloudinit.Config
+	mcfg     *MachineConfig
+	conf     *cloudinit.Config
 	renderer cloudinit.Renderer
 }
 
@@ -216,7 +216,7 @@ func (w *ubuntuConfigure) addMachineAgentToBoot(tag string) error {
 
 	name := w.mcfg.MachineAgentServiceName
 	conf := upstart.MachineAgentUpstartService(
-		name, toolsDir, w.mcfg.DataDir, w.mcfg.LogDir, tag, w.mcfg.MachineId, nil)
+		name, toolsDir, w.mcfg.DataDir, tag, w.mcfg.MachineId, nil)
 	cmds, err := conf.InstallCommands()
 	if err != nil {
 		return errors.Annotatef(err, "cannot make cloud-init upstart script for the %s agent", tag)
