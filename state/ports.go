@@ -111,11 +111,11 @@ func (p *Ports) Id() string {
 
 // Check if a port range can be opened.
 func (p *Ports) canOpenPorts(newPorts PortRange) bool {
-	for _, existingPorts := range p.doc.Ports {
-		if existingPorts.ConflictsWith(newPorts) {
-			return false
-		}
-	}
+	// for _, existingPorts := range p.doc.Ports {
+	// 	if existingPorts.ConflictsWith(newPorts) {
+	// 		return false
+	// 	}
+	// }
 	return true
 }
 
@@ -226,7 +226,8 @@ func (p *Ports) ClosePorts(portRange PortRange) error {
 			newPorts = append(newPorts, existingPortsDef)
 		}
 		if !found {
-			return nil, fmt.Errorf("no match found for port range: %v", portRange)
+			// return nil, fmt.Errorf("no match found for port range: %v", portRange)
+			return []txn.Op{}, nil
 		}
 		ops := []txn.Op{{
 			C:      unitsC,
