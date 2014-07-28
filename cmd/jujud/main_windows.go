@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/juju/juju/juju/names"
+
 	"bitbucket.org/kardianos/service"
 )
 
@@ -19,15 +21,15 @@ func runService() {
 		fmt.Errorf("%s", err)
 	}
 
-	err = s.Run(func() error {
-		// start
+	run := func() error {
 		go Main(os.Args)
 		return nil
-	}, func() error {
-		// stop
+	}
+	stop := func() error {
 		os.Exit(0)
 		return nil
-	})
+	}
+	err = s.Run(run, stop)
 
 	if err != nil {
 		s.Error(err.Error())
@@ -44,7 +46,9 @@ func main() {
 
 	isConsole := err == nil
 
-	if isConsole == true {
+	commandName := filepath.Base(os.Args[0])
+
+	if isConsole == true || commandName != names.Jujud {
 		runConsole()
 	} else {
 		runService()

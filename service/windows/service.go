@@ -90,7 +90,7 @@ func (s *Service) Installed() bool {
 // Exists returns whether the service configuration exists in the
 // init directory with the same content that this Service would have
 // if installed.
-// Does nothing on Windows
+// TODO (gabriel-samfira) Needs a proper implementation when testing is improved
 func (s *Service) Exists() bool {
 	return false
 }
