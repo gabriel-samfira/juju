@@ -418,7 +418,6 @@ func (u *Uniter) startJujucServer(context *HookContext) (*jujuc.Server, string, 
 
 // RunCommands executes the supplied commands in a hook context.
 func (u *Uniter) RunCommands(commands string) (results *exec.ExecResponse, err error) {
-	logger.Tracef("run commands: %s", commands)
 	hctxId := fmt.Sprintf("%s:run-commands:%d", u.unit.Name(), u.rand.Int63())
 	lockMessage := fmt.Sprintf("%s: running commands", u.unit.Name())
 	if err = u.acquireHookLock(lockMessage); err != nil {
@@ -435,7 +434,6 @@ func (u *Uniter) RunCommands(commands string) (results *exec.ExecResponse, err e
 		return nil, err
 	}
 	defer srv.Close()
-
 	result, err := hctx.RunCommands(commands, u.charmPath, u.toolsDir, socketPath)
 	if result != nil {
 		logger.Tracef("run commands: rc=%v\nstdout:\n%sstderr:\n%s", result.Code, result.Stdout, result.Stderr)
