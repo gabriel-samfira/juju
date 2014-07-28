@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/juju/juju/juju/names"
-
 	"bitbucket.org/kardianos/service"
 )
 
@@ -41,14 +39,12 @@ func runConsole() {
 }
 
 func main() {
-	args := os.Args
-	commandName := filepath.Base(args[0])
 	var mode uint32
 	err := syscall.GetConsoleMode(syscall.Stdin, &mode)
 
 	isConsole := err == nil
 
-	if isConsole == true || commandName != names.Jujud {
+	if isConsole == true {
 		runConsole()
 	} else {
 		runService()
