@@ -55,6 +55,32 @@ func (*formatSuite) TestWriteCommands(c *gc.C) {
 	c.Assert(commands[2], gc.Matches, `printf '%s\\n' '(.|\n)*' > '\S+/agents/machine-1/agent.conf'`)
 }
 
+func (*formatSuite) TestWindowsWriteCommands(c *gc.C) {
+	config := newTestConfig(c)
+	commands, err := config.WriteCommands("win8")
+	c.Assert(err, gc.IsNil)
+	c.Assert(commands, gc.HasLen, 2)
+	c.Assert(commands[0], gc.Matches, `mkdir \\tmp\\gocheck-5577006791947779410\\0\\agents\\machine-1`)
+	c.Assert(commands[1], gc.Matches, `Set-Content '/tmp/gocheck-5577006791947779410/0/agents/machine-1/agent.conf' @"
+# format 1.18
+tag: machine-1
+datadir: /tmp/gocheck-5577006791947779410/0
+logdir: /tmp/gocheck-5577006791947779410/1
+nonce: a nonce
+jobs:
+- JobHostUnits
+upgradedToVersion: 1.21-alpha1
+cacert: ca cert
+stateaddresses:
+- localhost:1234
+apiaddresses:
+- localhost:1235
+oldpassword: sekrit
+values: {}
+
+"@`)
+}
+
 func (*formatSuite) TestWriteAgentConfig(c *gc.C) {
 	config := newTestConfig(c)
 	err := config.Write()
