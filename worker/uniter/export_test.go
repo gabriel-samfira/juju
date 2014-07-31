@@ -18,3 +18,4 @@ func (u *Uniter) GetProxyValues() proxy.Settings {
 }
 
 var MergeEnvironment = mergeEnvironment
+var HookCommand = hookCommand

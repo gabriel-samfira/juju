@@ -16,6 +16,7 @@ import (
 	envtesting "github.com/juju/testing"
 	jc "github.com/juju/testing/checkers"
 	"github.com/juju/utils"
+	"github.com/juju/version"
 	"github.com/juju/utils/proxy"
 	gc "launchpad.net/gocheck"
 
@@ -811,6 +812,8 @@ func (s *RunCommandSuite) TestRunCommandsHasEnvironSet(c *gc.C) {
 	}
 }
 
+
+
 func (s *RunCommandSuite) TestRunCommandsStdOutAndErrAndRC(c *gc.C) {
 	context := s.getHookContext(c)
 	charmDir := c.MkDir()
@@ -825,4 +828,36 @@ exit 42
 	c.Assert(result.Code, gc.Equals, 42)
 	c.Assert(string(result.Stdout), gc.Equals, "this is standard out\n")
 	c.Assert(string(result.Stderr), gc.Equals, "this is standard err\n")
+}
+
+type WindowsHookSuite struct {}
+
+var _ = gc.Suite(&WindowsHookSuite{})
+
+func (s *WindowsHookSuite) TestHookCommandPowerShellScript(c *gc.C) {
+	restorer := envtesting.PatchValue(version.Current.OS, version.Windows)
+
+	hookname := "powerShellScript.ps1"
+	expected := []string{
+		"powershell.exe",
+		"-NonInteractive",
+		"ExecutionPolicy",
+		"RemoteSignaled",
+		"-File",
+		hookname,
+	}
+
+	c.Assert(HookCommand(hookname), gc.DeepEquals, expected)
+	restorer()
+}
+
+func (s *WindowsHookSuite) TestHookCommandNotPowerShellScripts(c *gc.C) {
+	restorer := envtesting.PatchValue(version.Current.OS, version.Windows)
+
+	cmdhook := "somehook.cmd"
+	c.Assert(HookCommand(cmdhook), gc.DeepEquals, []string{cmdhook})
+
+	bathook := "somehook.bat"
+	c.Assert(HookCommand(bathook), gc.DeepEquals, []string{bathook})
+	restorer()
 }
