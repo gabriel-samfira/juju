@@ -16,7 +16,7 @@ import (
 	envtesting "github.com/juju/testing"
 	jc "github.com/juju/testing/checkers"
 	"github.com/juju/utils"
-	"github.com/juju/version"
+	"github.com/juju/juju/version"
 	"github.com/juju/utils/proxy"
 	gc "launchpad.net/gocheck"
 
@@ -835,29 +835,29 @@ type WindowsHookSuite struct {}
 var _ = gc.Suite(&WindowsHookSuite{})
 
 func (s *WindowsHookSuite) TestHookCommandPowerShellScript(c *gc.C) {
-	restorer := envtesting.PatchValue(version.Current.OS, version.Windows)
+	restorer := envtesting.PatchValue(&version.Current.OS, version.Windows)
 
 	hookname := "powerShellScript.ps1"
 	expected := []string{
 		"powershell.exe",
 		"-NonInteractive",
-		"ExecutionPolicy",
-		"RemoteSignaled",
+		"-ExecutionPolicy",
+		"RemoteSigned",
 		"-File",
 		hookname,
 	}
 
-	c.Assert(HookCommand(hookname), gc.DeepEquals, expected)
+	c.Assert(uniter.HookCommand(hookname), gc.DeepEquals, expected)
 	restorer()
 }
 
 func (s *WindowsHookSuite) TestHookCommandNotPowerShellScripts(c *gc.C) {
-	restorer := envtesting.PatchValue(version.Current.OS, version.Windows)
+	restorer := envtesting.PatchValue(&version.Current.OS, version.Windows)
 
 	cmdhook := "somehook.cmd"
-	c.Assert(HookCommand(cmdhook), gc.DeepEquals, []string{cmdhook})
+	c.Assert(uniter.HookCommand(cmdhook), gc.DeepEquals, []string{cmdhook})
 
 	bathook := "somehook.bat"
-	c.Assert(HookCommand(bathook), gc.DeepEquals, []string{bathook})
+	c.Assert(uniter.HookCommand(bathook), gc.DeepEquals, []string{bathook})
 	restorer()
 }
