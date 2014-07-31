@@ -386,7 +386,7 @@ func searchHook(hook string) (string, error) {
 	return "", &missingHookError{hook}
 }
 
-// &hookCommand constructs an appropriate command to be passed to
+// hookCommand constructs an appropriate command to be passed to
 // exec.Command(). The exec package uses cmd.exe as default on windows
 // cmd.exe does not know how to execute ps1 files by default, and
 // powershell needs a few flags to allow execution (-ExecutionPolicy)
