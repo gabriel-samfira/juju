@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/juju/charm"
+	"github.com/juju/juju/version"
 	"github.com/juju/names"
 	envtesting "github.com/juju/testing"
 	jc "github.com/juju/testing/checkers"
 	"github.com/juju/utils"
-	"github.com/juju/juju/version"
 	"github.com/juju/utils/proxy"
 	gc "launchpad.net/gocheck"
 
@@ -812,8 +812,6 @@ func (s *RunCommandSuite) TestRunCommandsHasEnvironSet(c *gc.C) {
 	}
 }
 
-
-
 func (s *RunCommandSuite) TestRunCommandsStdOutAndErrAndRC(c *gc.C) {
 	context := s.getHookContext(c)
 	charmDir := c.MkDir()
@@ -830,7 +828,7 @@ exit 42
 	c.Assert(string(result.Stderr), gc.Equals, "this is standard err\n")
 }
 
-type WindowsHookSuite struct {}
+type WindowsHookSuite struct{}
 
 var _ = gc.Suite(&WindowsHookSuite{})
 
@@ -859,5 +857,66 @@ func (s *WindowsHookSuite) TestHookCommandNotPowerShellScripts(c *gc.C) {
 
 	bathook := "somehook.bat"
 	c.Assert(uniter.HookCommand(bathook), gc.DeepEquals, []string{bathook})
+
+	restorer()
+}
+
+func (s *WindowsHookSuite) TestSearchHookUbuntu(c *gc.C) {
+	charmDir, _ := makeCharm(c, hookSpec{
+		name: "something-happened",
+		perm: 0755,
+	})
+	var _ = charmDir
+
+	oldPath := os.Getenv("PATH")
+	os.Setenv("PATH", filepath.Join(charmDir, "hooks")+oldPath)
+
+	expected, err := uniter.LookPath(filepath.Join(charmDir, "hooks", "something-happened"))
+	c.Assert(err, gc.IsNil)
+	obtained, err := uniter.SearchHook(filepath.Join(charmDir, "hooks", "something-happened"))
+	c.Assert(err, gc.IsNil)
+	c.Assert(obtained, gc.Equals, expected)
+
+	os.Setenv("PATH", oldPath)
+}
+
+func (s *WindowsHookSuite) TestSearchHookWindows(c *gc.C) {
+	charmDir, _ := makeCharm(c, hookSpec{
+		name: "something-happened.ps1",
+		perm: 0755,
+	})
+	var _ = charmDir
+
+	oldPath := os.Getenv("PATH")
+	os.Setenv("PATH", filepath.Join(charmDir, "hooks")+string(os.PathListSeparator)+oldPath)
+
+	restorer := envtesting.PatchValue(&version.Current.OS, version.Windows)
+
+	obtained, err := uniter.SearchHook("something-happened")
+	c.Assert(err, gc.IsNil)
+	c.Assert(obtained, gc.Equals, filepath.Join(charmDir, "hooks", "something-happened.ps1"))
+
+	os.Setenv("PATH", oldPath)
+	restorer()
+}
+
+func (s *WindowsHookSuite) TestSearchHookWindowsError(c *gc.C) {
+	charmDir, _ := makeCharm(c, hookSpec{
+		name: "something-happened.linux",
+		perm: 0755,
+	})
+	var _ = charmDir
+
+	oldPath := os.Getenv("PATH")
+	os.Setenv("PATH", filepath.Join(charmDir, "hooks")+string(os.PathListSeparator)+oldPath)
+
+	restorer := envtesting.PatchValue(&version.Current.OS, version.Windows)
+
+	obtained, err := uniter.SearchHook("something-happened")
+	c.Assert(err, gc.ErrorMatches, "something-happened does not exist")
+	c.Assert(obtained, gc.Equals, "")
+
+	os.Setenv("PATH", oldPath)
+
 	restorer()
 }

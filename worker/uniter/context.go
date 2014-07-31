@@ -28,10 +28,10 @@ import (
 )
 
 var windowsSuffixOrder = []string{
-	".ps1",
-	".cmd",
-	".bat",
-	".exe",
+	"ps1",
+	"cmd",
+	"bat",
+	"exe",
 }
 
 type missingHookError struct {
@@ -353,7 +353,7 @@ func (ctx *HookContext) runCharmHookWithLocation(hookName, charmLocation, charmD
 func lookPath(hook string) (string, error) {
 	hookFile, err := exec.LookPath(hook)
 	if err != nil {
-		if ee, ok := err.(*exec.Error); ok && os.IsNotExist(ee.Err) {
+		if ee, ok := err.(*exec.Error); ok && ee.Err == exec.ErrNotFound {
 			return "", &missingHookError{hook}
 		}
 		return "", err
@@ -386,7 +386,7 @@ func searchHook(hook string) (string, error) {
 	return "", &missingHookError{hook}
 }
 
-// hookCommand constructs an appropriate command to be passed to
+// &hookCommand constructs an appropriate command to be passed to
 // exec.Command(). The exec package uses cmd.exe as default on windows
 // cmd.exe does not know how to execute ps1 files by default, and
 // powershell needs a few flags to allow execution (-ExecutionPolicy)
