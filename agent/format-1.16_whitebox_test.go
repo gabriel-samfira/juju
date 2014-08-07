@@ -25,25 +25,6 @@ type format_1_16Suite struct {
 
 var _ = gc.Suite(&format_1_16Suite{})
 
-func (s *format_1_16Suite) TestMissingAttributes(c *gc.C) {
-	dataDir := c.MkDir()
-	formatPath := filepath.Join(dataDir, legacyFormatFilename)
-	err := utils.AtomicWriteFile(formatPath, []byte(legacyFormatFileContents), 0600)
-	c.Assert(err, gc.IsNil)
-	configPath := filepath.Join(dataDir, agentConfigFilename)
-	err = utils.AtomicWriteFile(configPath, []byte(configDataWithoutNewAttributes), 0600)
-	c.Assert(err, gc.IsNil)
-	readConfig, err := ReadConfig(configPath)
-	c.Assert(err, gc.IsNil)
-	c.Assert(readConfig.UpgradedToVersion(), gc.Equals, version.MustParse("1.16.0"))
-	c.Assert(readConfig.LogDir(), gc.Equals, "/var/log/juju")
-	c.Assert(readConfig.DataDir(), gc.Equals, "/var/lib/juju")
-	// Test data doesn't include a StateServerKey so StateServingInfo
-	// should *not* be available
-	_, available := readConfig.StateServingInfo()
-	c.Assert(available, gc.Equals, false)
-}
-
 func (*format_1_16Suite) TestStatePortParsed(c *gc.C) {
 	dataDir := c.MkDir()
 	formatPath := filepath.Join(dataDir, legacyFormatFilename)

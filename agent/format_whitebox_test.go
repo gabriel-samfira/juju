@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/juju/names"
 	jc "github.com/juju/testing/checkers"
@@ -115,7 +116,9 @@ func assertFileExists(c *gc.C, path string) {
 	fileInfo, err := os.Stat(path)
 	c.Assert(err, gc.IsNil)
 	c.Assert(fileInfo.Mode().IsRegular(), jc.IsTrue)
-	c.Assert(fileInfo.Mode().Perm(), gc.Equals, os.FileMode(0600))
+	if runtime.GOOS == "linux" {
+		c.Assert(fileInfo.Mode().Perm(), gc.Equals, os.FileMode(0600))
+	}
 	c.Assert(fileInfo.Size(), jc.GreaterThan, 0)
 }
 
