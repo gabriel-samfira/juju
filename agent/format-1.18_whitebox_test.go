@@ -27,19 +27,6 @@ var _ = gc.Suite(&format_1_18Suite{})
 
 var configData1_18WithoutUpgradedToVersion = "# format 1.18\n" + configDataWithoutNewAttributes
 
-func (s *format_1_18Suite) TestMissingAttributes(c *gc.C) {
-	dataDir := c.MkDir()
-	configPath := filepath.Join(dataDir, agentConfigFilename)
-	err := utils.AtomicWriteFile(configPath, []byte(configData1_18WithoutUpgradedToVersion), 0600)
-	c.Assert(err, gc.IsNil)
-	readConfig, err := ReadConfig(configPath)
-	c.Assert(err, gc.IsNil)
-	c.Assert(readConfig.UpgradedToVersion(), gc.Equals, version.MustParse("1.16.0"))
-	c.Assert(readConfig.LogDir(), gc.Equals, "/var/log/juju")
-	c.Assert(readConfig.DataDir(), gc.Equals, "/var/lib/juju")
-	c.Assert(readConfig.PreferIPv6(), jc.IsFalse)
-}
-
 func (s *format_1_18Suite) TestStatePortNotParsedWithoutSecret(c *gc.C) {
 	dataDir := c.MkDir()
 	configPath := filepath.Join(dataDir, agentConfigFilename)

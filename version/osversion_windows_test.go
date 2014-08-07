@@ -1,4 +1,4 @@
-// Copyright 2014 Canonical Ltd.
+// Copyright 2014 Cloudbase Solutions SRL
 // Licensed under the AGPLv3, see LICENCE file for details.
 
 package version
@@ -9,13 +9,13 @@ import (
 	gc "launchpad.net/gocheck"
 )
 
-type macOSXVersionSuite struct{}
+type windowsVersionSuite struct{}
 
-var _ = gc.Suite(&macOSXVersionSuite{})
+var _ = gc.Suite(&windowsVersionSuite{})
 
-func (s *macOSXVersionSuite) TestOSVersion(c *gc.C) {
+func (s *windowsVersionSuite) TestOSVersion(c *gc.C) {
 	knownSeries := set.Strings{}
-	for _, series := range macOSXSeries {
+	for _, series := range windowsVersions {
 		knownSeries.Add(series)
 	}
 	version, err := osVersion()

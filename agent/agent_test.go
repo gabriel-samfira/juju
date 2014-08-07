@@ -5,6 +5,7 @@ package agent_test
 
 import (
 	"fmt"
+	"path/filepath"
 	"reflect"
 
 	"github.com/juju/names"
@@ -426,7 +427,9 @@ func (*suite) TestAttributes(c *gc.C) {
 	conf, err := agent.NewAgentConfig(attributeParams)
 	c.Assert(err, gc.IsNil)
 	c.Assert(conf.DataDir(), gc.Equals, "/data/dir")
-	c.Assert(conf.SystemIdentityPath(), gc.Equals, "/data/dir/system-identity")
+	compareSystemIdentityPath := filepath.FromSlash("/data/dir/system-identity")
+	systemIdentityPath := filepath.FromSlash(conf.SystemIdentityPath())
+	c.Assert(systemIdentityPath, gc.Equals, compareSystemIdentityPath)
 	c.Assert(conf.Tag(), gc.Equals, names.NewMachineTag("1"))
 	c.Assert(conf.Dir(), gc.Equals, "/data/dir/agents/machine-1")
 	c.Assert(conf.Nonce(), gc.Equals, "a nonce")

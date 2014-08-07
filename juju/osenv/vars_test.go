@@ -4,7 +4,6 @@
 package osenv_test
 
 import (
-	"path/filepath"
 	"runtime"
 
 	gc "launchpad.net/gocheck"
@@ -18,18 +17,6 @@ type varsSuite struct {
 }
 
 var _ = gc.Suite(&varsSuite{})
-
-func (s *varsSuite) TestJujuHomeWin(c *gc.C) {
-	path := `P:\FooBar\AppData`
-	s.PatchEnvironment("APPDATA", path)
-	c.Assert(osenv.JujuHomeWin(), gc.Equals, filepath.Join(path, "Juju"))
-}
-
-func (s *varsSuite) TestJujuHomeLinux(c *gc.C) {
-	path := `/foo/bar/baz/`
-	s.PatchEnvironment("HOME", path)
-	c.Assert(osenv.JujuHomeLinux(), gc.Equals, filepath.Join(path, ".juju"))
-}
 
 func (s *varsSuite) TestJujuHomeEnvVar(c *gc.C) {
 	path := "/foo/bar/baz"
