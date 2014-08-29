@@ -47,6 +47,81 @@ func (s *MachineSuite) SetUpTest(c *gc.C) {
 	c.Assert(err, gc.IsNil)
 }
 
+func (s *MachineSuite) TestSetRebootFlag(c *gc.C) {
+	err := s.machine.SetRebootFlag(true)
+	c.Assert(err, gc.IsNil)
+
+	rebootFlag, err := s.machine.GetRebootFlag()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rebootFlag, jc.IsTrue)
+}
+
+func (s *MachineSuite) TestSetUnsetRebootFlag(c *gc.C) {
+	err := s.machine.SetRebootFlag(true)
+	c.Assert(err, gc.IsNil)
+
+	rebootFlag, err := s.machine.GetRebootFlag()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rebootFlag, jc.IsTrue)
+
+	err = s.machine.SetRebootFlag(false)
+	c.Assert(err, gc.IsNil)
+
+	rebootFlag, err = s.machine.GetRebootFlag()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rebootFlag, jc.IsFalse)
+}
+
+func (s *MachineSuite) TestShouldShutdownOrReboot(c *gc.C) {
+	// Add first container.
+	c1, err := s.State.AddMachineInsideMachine(state.MachineTemplate{
+		Series: "quantal",
+		Jobs:   []state.MachineJob{state.JobHostUnits},
+	}, s.machine.Id(), instance.LXC)
+	c.Assert(err, gc.IsNil)
+
+	// Add second container.
+	c2, err := s.State.AddMachineInsideMachine(state.MachineTemplate{
+		Series: "quantal",
+		Jobs:   []state.MachineJob{state.JobHostUnits},
+	}, c1.Id(), instance.LXC)
+	c.Assert(err, gc.IsNil)
+
+	err = c2.SetRebootFlag(true)
+	c.Assert(err, gc.IsNil)
+
+	rAction, err := s.machine.ShouldRebootOrShutdown()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rAction, gc.Equals, params.ShouldDoNothing)
+
+	rAction, err = c1.ShouldRebootOrShutdown()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rAction, gc.Equals, params.ShouldDoNothing)
+
+	rAction, err = c2.ShouldRebootOrShutdown()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rAction, gc.Equals, params.ShouldReboot)
+
+	// // Reboot happens on the root node
+	err = c2.SetRebootFlag(false)
+	c.Assert(err, gc.IsNil)
+
+	err = s.machine.SetRebootFlag(true)
+	c.Assert(err, gc.IsNil)
+
+	rAction, err = s.machine.ShouldRebootOrShutdown()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rAction, gc.Equals, params.ShouldReboot)
+
+	rAction, err = c1.ShouldRebootOrShutdown()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rAction, gc.Equals, params.ShouldShutdown)
+
+	rAction, err = c2.ShouldRebootOrShutdown()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rAction, gc.Equals, params.ShouldShutdown)
+}
+
 func (s *MachineSuite) TestContainerDefaults(c *gc.C) {
 	c.Assert(string(s.machine.ContainerType()), gc.Equals, "")
 	containers, err := s.machine.Containers()

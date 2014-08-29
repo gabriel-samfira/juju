@@ -1900,6 +1900,142 @@ func (s *StateSuite) TestWatchStateServerInfo(c *gc.C) {
 	})
 }
 
+func (s *StateSuite) TestWatchForRebootEvent(c *gc.C) {
+	machine, err := s.State.AddMachine("quantal", state.JobManageEnviron)
+	c.Assert(err, gc.IsNil)
+
+	w, err := machine.WatchForRebootEvent()
+	c.Assert(err, gc.IsNil)
+	defer statetesting.AssertStop(c, w)
+
+	// Initial event.
+	wc := statetesting.NewNotifyWatcherC(c, s.State, w)
+	wc.AssertOneChange()
+
+	err = machine.SetRebootFlag(true)
+	c.Assert(err, gc.IsNil)
+
+	wc.AssertOneChange()
+
+	inState, err := machine.GetRebootFlag()
+	c.Assert(err, gc.IsNil)
+	c.Assert(inState, jc.IsTrue)
+
+	err = machine.SetRebootFlag(false)
+	c.Assert(err, gc.IsNil)
+
+	wc.AssertOneChange()
+
+	inState, err = machine.GetRebootFlag()
+	c.Assert(err, gc.IsNil)
+	c.Assert(inState, jc.IsFalse)
+}
+
+func (s *StateSuite) TestWatchForRebootEventFromContainers(c *gc.C) {
+	machine, err := s.State.AddMachine("quantal", state.JobManageEnviron)
+	c.Assert(err, gc.IsNil)
+
+	// Add first container.
+	c1, err := s.State.AddMachineInsideMachine(state.MachineTemplate{
+		Series: "quantal",
+		Jobs:   []state.MachineJob{state.JobHostUnits},
+	}, machine.Id(), instance.LXC)
+	c.Assert(err, gc.IsNil)
+
+	// Add second container.
+	c2, err := s.State.AddMachineInsideMachine(state.MachineTemplate{
+		Series: "quantal",
+		Jobs:   []state.MachineJob{state.JobHostUnits},
+	}, c1.Id(), instance.KVM)
+	c.Assert(err, gc.IsNil)
+
+	// Add container on the same level as the first container.
+	c3, err := s.State.AddMachineInsideMachine(state.MachineTemplate{
+		Series: "quantal",
+		Jobs:   []state.MachineJob{state.JobHostUnits},
+	}, machine.Id(), instance.LXC)
+	c.Assert(err, gc.IsNil)
+
+	w, err := machine.WatchForRebootEvent()
+	c.Assert(err, gc.IsNil)
+	defer statetesting.AssertStop(c, w)
+
+	// Initial event on machine.
+	wc := statetesting.NewNotifyWatcherC(c, s.State, w)
+	wc.AssertOneChange()
+
+	wC1, err := c1.WatchForRebootEvent()
+	c.Assert(err, gc.IsNil)
+	defer statetesting.AssertStop(c, wC1)
+
+	// Initial event on container 1.
+	wcC1 := statetesting.NewNotifyWatcherC(c, s.State, wC1)
+	wcC1.AssertOneChange()
+
+	// Get reboot watcher on container 2
+	wC2, err := c2.WatchForRebootEvent()
+	c.Assert(err, gc.IsNil)
+	defer statetesting.AssertStop(c, wC2)
+
+	// Initial event on container 2.
+	wcC2 := statetesting.NewNotifyWatcherC(c, s.State, wC2)
+	wcC2.AssertOneChange()
+
+	// Get reboot watcher on container 3
+	wC3, err := c3.WatchForRebootEvent()
+	c.Assert(err, gc.IsNil)
+	defer statetesting.AssertStop(c, wC3)
+
+	// Initial event on container 3.
+	wcC3 := statetesting.NewNotifyWatcherC(c, s.State, wC3)
+	wcC3.AssertOneChange()
+
+	// Reboot request happens on machine: everyone see it (including container3)
+	err = machine.SetRebootFlag(true)
+	c.Assert(err, gc.IsNil)
+
+	wcC3.AssertOneChange()
+	wcC2.AssertOneChange()
+	wcC1.AssertOneChange()
+	wc.AssertOneChange()
+
+	err = machine.SetRebootFlag(false)
+	c.Assert(err, gc.IsNil)
+	wc.AssertOneChange()
+	wcC1.AssertOneChange()
+	wcC2.AssertOneChange()
+	wcC3.AssertOneChange()
+
+	// everything beyond this point should be invisible to container3
+	// Reboot request happens on container2: only container2 sees it
+	err = c2.SetRebootFlag(true)
+	c.Assert(err, gc.IsNil)
+
+	wc.AssertNoChange()
+	wcC1.AssertNoChange()
+	wcC2.AssertOneChange()
+	wcC3.AssertNoChange()
+
+	err = c2.SetRebootFlag(false)
+	c.Assert(err, gc.IsNil)
+	wcC2.AssertOneChange()
+
+	// Reboot request happens on container1: only container1 andcontainer2
+	// react
+	err = c1.SetRebootFlag(true)
+	c.Assert(err, gc.IsNil)
+
+	wcC2.AssertOneChange()
+	wcC1.AssertOneChange()
+	wc.AssertNoChange()
+	wcC3.AssertNoChange()
+
+	err = c1.SetRebootFlag(false)
+	c.Assert(err, gc.IsNil)
+	wcC1.AssertOneChange()
+	wcC2.AssertOneChange()
+}
+
 func (s *StateSuite) TestAdditionalValidation(c *gc.C) {
 	updateAttrs := map[string]interface{}{"logging-config": "juju=ERROR"}
 	configValidator1 := func(updateAttrs map[string]interface{}, removeAttrs []string, oldConfig *config.Config) error {
