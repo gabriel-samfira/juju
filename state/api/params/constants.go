@@ -65,6 +65,14 @@ const (
 	// The entity ought to be signalling activity, but it cannot be
 	// detected.
 	StatusDown Status = "down"
+
+	// The machine agent has received a request to reboot. This does
+	// not apply to unit agents.
+	StatusRebooting = "rebooting"
+
+	// This applies to machine agents of containers started by the machine
+	// that wants to reboot. Does not apply to unit agents.
+	StatusStopping = "stopping"
 )
 
 // Valid returns true if status has a known value.

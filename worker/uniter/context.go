@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/juju/loggo"
@@ -39,6 +40,22 @@ type missingHookError struct {
 }
 
 type actionParams map[string]interface{}
+
+func rebootRequiredError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg, _ := err.(*exec.ExitError)
+	if msg == nil {
+		return false
+	}
+	code := msg.Sys().(syscall.WaitStatus).ExitStatus()
+	if code == 101 {
+		return true
+	}
+
+	return false
+}
 
 func (e *missingHookError) Error() string {
 	return e.hookName + " does not exist"

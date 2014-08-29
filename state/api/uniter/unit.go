@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/juju/loggo"
 	"github.com/juju/names"
 	"gopkg.in/juju/charm.v3"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/juju/juju/state/api/params"
 	"github.com/juju/juju/state/api/watcher"
 )
+
+var logger = loggo.GetLogger("juju.state.api.unit")
 
 // Unit represents a juju unit as seen by a uniter worker.
 type Unit struct {
@@ -49,6 +52,20 @@ func (u *Unit) Refresh() error {
 		return err
 	}
 	u.life = life
+	return nil
+}
+
+func (u *Unit) RequestReboot() error {
+	var result params.ErrorResult
+	logger.Infof("Requesting reboot")
+	err := u.st.facade.FacadeCall("RequestReboot", nil, &result)
+	if err != nil {
+		return err
+	}
+	if result.Error != nil {
+		return result.Error
+	}
+	logger.Infof("Requesting sent ok")
 	return nil
 }
 

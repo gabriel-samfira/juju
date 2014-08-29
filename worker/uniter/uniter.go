@@ -562,6 +562,17 @@ func (u *Uniter) runHook(hi hook.Info) (err error) {
 	// will still occur correctly.
 	if IsMissingHookError(err) {
 		ranHook = false
+	} else if rebootRequiredError(err) {
+		logger.Infof("Hook %s requested a reboot", hookName)
+		err := u.unit.RequestReboot()
+		if err != nil {
+			return err
+		}
+		if err := u.writeState(RunHook, Queued, &hi, nil); err != nil {
+			return err
+		}
+		logger.Infof("Stopping uniter due to reboot")
+		return u.Stop()
 	} else if err != nil {
 		logger.Errorf("hook failed: %s", err)
 		u.notifyHookFailed(hookName, hctx)
