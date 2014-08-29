@@ -13,6 +13,14 @@ const (
 	Dead  Life = "dead"
 )
 
+type RebootAction int
+
+const (
+	ShouldDoNothing RebootAction = iota
+	ShouldReboot
+	ShouldShutdown
+)
+
 // MachineJob values define responsibilities that machines may be
 // expected to fulfil.
 type MachineJob string
