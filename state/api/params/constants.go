@@ -84,6 +84,8 @@ func (status Status) Valid() bool {
 		StatusStarted,
 		StatusStopped,
 		StatusError,
+		StatusRebooting,
+		StatusStopping,
 		StatusDown:
 	default:
 		return false

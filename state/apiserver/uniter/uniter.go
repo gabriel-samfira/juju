@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/juju/errors"
+	"github.com/juju/loggo"
 	"github.com/juju/names"
 	"gopkg.in/juju/charm.v3"
 
@@ -17,6 +18,8 @@ import (
 	"github.com/juju/juju/state/apiserver/common"
 	"github.com/juju/juju/state/watcher"
 )
+
+var logger = loggo.GetLogger("juju.state.apiserver.reboot")
 
 func init() {
 	common.RegisterStandardFacade("Uniter", 0, NewUniterAPI)
@@ -118,6 +121,34 @@ func (u *UniterAPI) PublicAddress(args params.Entities) (params.StringResults, e
 		result.Results[i].Error = common.ServerError(err)
 	}
 	return result, nil
+}
+
+func (api *UniterAPI) RequestReboot() (params.ErrorResult, error) {
+	logger.Infof("Got reboot request from: %v", api.auth.GetAuthTag())
+	var tag names.UnitTag
+
+	tag = api.auth.GetAuthTag().(names.UnitTag)
+
+	// Get the unit by tag
+	unit, err := api.getUnit(tag)
+	if err != nil {
+		return params.ErrorResult{}, err
+	}
+	// Get assigned machine ID
+	machineId, err := unit.AssignedMachineId()
+	if err != nil {
+		return params.ErrorResult{}, err
+	}
+	// Get machine object
+	machine, err := api.st.Machine(machineId)
+	if err != nil {
+		return params.ErrorResult{}, err
+	}
+
+	// Set status to StatusRebooting
+	err = machine.SetStatus(params.StatusRebooting, "", nil)
+
+	return params.ErrorResult{Error: common.ServerError(err)}, nil
 }
 
 // PrivateAddress returns the private address for each given unit, if set.
