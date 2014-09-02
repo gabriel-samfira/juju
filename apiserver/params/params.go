@@ -824,3 +824,15 @@ type FindToolsResult struct {
 	List  tools.List
 	Error *Error
 }
+
+// RebootActionResults holds a list of RebootActionResult and any error.
+type RebootActionResults struct {
+	Results []RebootActionResult
+}
+
+// RebootActionResult holds the result of a single call to
+// machine.ShouldRebootOrShutdown.
+type RebootActionResult struct {
+	Result RebootAction
+	Error  *Error
+}

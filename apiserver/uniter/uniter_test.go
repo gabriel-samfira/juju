@@ -111,6 +111,34 @@ func (s *uniterSuite) SetUpTest(c *gc.C) {
 	s.EnvironWatcherTest = commontesting.NewEnvironWatcherTest(s.uniter, s.State, s.resources, commontesting.NoSecrets)
 }
 
+func (s *uniterSuite) TestRequestReboot(c *gc.C) {
+	args := params.Entities{Entities: []params.Entity{
+		{Tag: s.machine0.Tag().String()},
+		{Tag: s.machine1.Tag().String()},
+	}}
+	errResult, err := s.uniter.RequestReboot(args)
+	c.Assert(err, gc.IsNil)
+	c.Assert(errResult, gc.DeepEquals, params.ErrorResults{
+		Results: []params.ErrorResult{
+			{Error: nil},
+			{Error: apiservertesting.ErrUnauthorized},
+		}})
+
+	rFlag, err := s.machine0.GetRebootFlag()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rFlag, jc.IsTrue)
+
+	rFlag, err = s.machine1.GetRebootFlag()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rFlag, jc.IsFalse)
+}
+
+func (s *uniterSuite) TestAssignedMachine(c *gc.C) {
+	strResult, err := s.uniter.AssignedMachine()
+	c.Assert(err, gc.IsNil)
+	c.Assert(strResult.Result, gc.Equals, s.machine0.Tag().String())
+}
+
 func (s *uniterSuite) TestUniterFailsWithNonUnitAgentUser(c *gc.C) {
 	anAuthorizer := s.authorizer
 	anAuthorizer.Tag = names.NewMachineTag("9")
