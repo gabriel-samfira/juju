@@ -26,7 +26,7 @@ type RebootAPI struct {
 }
 
 func init() {
-	common.RegisterStandardFacade("Reboot", 0, NewRebootAPI)
+	common.RegisterStandardFacade("Reboot", 0, newRebootFacade)
 }
 
 type Rebooter interface {
@@ -34,6 +34,30 @@ type Rebooter interface {
 	RequestReboot() (params.ErrorResult, error)
 	ClearReboot() (params.ErrorResult, error)
 	GetRebootAction() (params.RebootActionResult, error)
+}
+
+// newRebootFacade returnes a Rebooter that allows both the unit agent and
+// the machine agent to access the reboot API
+// The unit agent should be able to request reboot, and watch its machine agent
+// reboot status but should not be able to clear the status. That operation should
+// be left to the machine agent before rebooting.
+func newRebootFacade(st *state.State,
+	resources *common.Resources,
+	auth common.Authorizer) (Rebooter, error) {
+
+	tag, err := names.ParseTag(auth.GetAuthTag().String())
+	if err != nil {
+		return nil, common.ErrPerm
+	}
+
+	switch tag.(type) {
+	case names.MachineTag:
+		return NewRebootAPI(st, resources, auth)
+	case names.UnitTag:
+		return NewUniterRebootAPI(st, resources, auth)
+	}
+	// Not a machine or unit.
+	return nil, common.ErrPerm
 }
 
 // NewRebootAPI creates a new client-side RebootAPI facade.
