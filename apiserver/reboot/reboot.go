@@ -1,3 +1,7 @@
+// Copyright 2014 Cloudbase Solutions SRL
+// Copyright 2014 Canonical Ltd.
+// Licensed under the AGPLv3, see LICENCE file for details.
+
 package reboot
 
 import (
@@ -25,12 +29,19 @@ func init() {
 	common.RegisterStandardFacade("Reboot", 0, NewRebootAPI)
 }
 
+type Rebooter interface {
+	WatchForRebootEvent() (params.NotifyWatchResult, error)
+	RequestReboot() (params.ErrorResult, error)
+	ClearReboot() (params.ErrorResult, error)
+	GetRebootAction() (params.RebootActionResult, error)
+}
+
 // NewRebootAPI creates a new client-side RebootAPI facade.
 func NewRebootAPI(
 	st *state.State,
 	resources *common.Resources,
 	auth common.Authorizer,
-) (*RebootAPI, error) {
+) (Rebooter, error) {
 	if !auth.AuthMachineAgent() {
 		return nil, common.ErrPerm
 	}
@@ -100,7 +111,7 @@ func (r *RebootAPI) ClearReboot() (params.ErrorResult, error) {
 func (r *RebootAPI) GetRebootAction() (params.RebootActionResult, error) {
 	rAction, err := r.machine.ShouldRebootOrShutdown()
 	if err != nil {
-		return params.RebootActionResult{RebootAction: params.ShouldDoNothing}, errors.Trace(err)
+		return params.RebootActionResult{Result: params.ShouldDoNothing}, errors.Trace(err)
 	}
-	return params.RebootActionResult{RebootAction: rAction}, nil
+	return params.RebootActionResult{Result: rAction}, nil
 }

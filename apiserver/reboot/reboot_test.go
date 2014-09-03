@@ -22,7 +22,7 @@ type machines struct {
 	authorizer apiservertesting.FakeAuthorizer
 	resources  *common.Resources
 
-	rebootAPI *reboot.RebootAPI
+	rebootAPI reboot.Rebooter
 }
 
 type rebootSuite struct {
@@ -131,7 +131,7 @@ func (s *rebootSuite) TestRequestReboot(c *gc.C) {
 
 	res, err := s.machine.rebootAPI.GetRebootAction()
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.RebootAction, gc.Equals, params.ShouldReboot)
+	c.Assert(res.Result, gc.Equals, params.ShouldReboot)
 
 	statetesting.AssertStop(c, w)
 	wc.AssertClosed()
@@ -158,7 +158,7 @@ func (s *rebootSuite) TestClearReboot(c *gc.C) {
 
 	res, err := s.machine.rebootAPI.GetRebootAction()
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.RebootAction, gc.Equals, params.ShouldReboot)
+	c.Assert(res.Result, gc.Equals, params.ShouldReboot)
 
 	errResult, err = s.machine.rebootAPI.ClearReboot()
 	c.Assert(err, gc.IsNil)
@@ -166,7 +166,7 @@ func (s *rebootSuite) TestClearReboot(c *gc.C) {
 
 	res, err = s.machine.rebootAPI.GetRebootAction()
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.RebootAction, gc.Equals, params.ShouldDoNothing)
+	c.Assert(res.Result, gc.Equals, params.ShouldDoNothing)
 
 	statetesting.AssertStop(c, w)
 	wc.AssertClosed()
@@ -226,15 +226,15 @@ func (s *rebootSuite) TestWatchForRebootEventFromContainer(c *gc.C) {
 
 	res, err := s.machine.rebootAPI.GetRebootAction()
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.RebootAction, gc.Equals, params.ShouldReboot)
+	c.Assert(res.Result, gc.Equals, params.ShouldReboot)
 
 	res, err = s.container.rebootAPI.GetRebootAction()
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.RebootAction, gc.Equals, params.ShouldShutdown)
+	c.Assert(res.Result, gc.Equals, params.ShouldShutdown)
 
 	res, err = s.nestedContainer.rebootAPI.GetRebootAction()
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.RebootAction, gc.Equals, params.ShouldShutdown)
+	c.Assert(res.Result, gc.Equals, params.ShouldShutdown)
 
 	errResult, err = s.machine.rebootAPI.ClearReboot()
 	c.Assert(err, gc.IsNil)
@@ -258,15 +258,15 @@ func (s *rebootSuite) TestWatchForRebootEventFromContainer(c *gc.C) {
 
 	res, err = s.machine.rebootAPI.GetRebootAction()
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.RebootAction, gc.Equals, params.ShouldDoNothing)
+	c.Assert(res.Result, gc.Equals, params.ShouldDoNothing)
 
 	res, err = s.container.rebootAPI.GetRebootAction()
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.RebootAction, gc.Equals, params.ShouldReboot)
+	c.Assert(res.Result, gc.Equals, params.ShouldReboot)
 
 	res, err = s.nestedContainer.rebootAPI.GetRebootAction()
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.RebootAction, gc.Equals, params.ShouldShutdown)
+	c.Assert(res.Result, gc.Equals, params.ShouldShutdown)
 
 	errResult, err = s.container.rebootAPI.ClearReboot()
 	c.Assert(err, gc.IsNil)
@@ -290,15 +290,15 @@ func (s *rebootSuite) TestWatchForRebootEventFromContainer(c *gc.C) {
 
 	res, err = s.machine.rebootAPI.GetRebootAction()
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.RebootAction, gc.Equals, params.ShouldDoNothing)
+	c.Assert(res.Result, gc.Equals, params.ShouldDoNothing)
 
 	res, err = s.container.rebootAPI.GetRebootAction()
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.RebootAction, gc.Equals, params.ShouldDoNothing)
+	c.Assert(res.Result, gc.Equals, params.ShouldDoNothing)
 
 	res, err = s.nestedContainer.rebootAPI.GetRebootAction()
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.RebootAction, gc.Equals, params.ShouldReboot)
+	c.Assert(res.Result, gc.Equals, params.ShouldReboot)
 
 	errResult, err = s.nestedContainer.rebootAPI.ClearReboot()
 	c.Assert(err, gc.IsNil)
