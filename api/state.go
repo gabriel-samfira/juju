@@ -20,6 +20,7 @@ import (
 	"github.com/juju/juju/api/machiner"
 	"github.com/juju/juju/api/networker"
 	"github.com/juju/juju/api/provisioner"
+	"github.com/juju/juju/api/reboot"
 	"github.com/juju/juju/api/rsyslog"
 	"github.com/juju/juju/api/uniter"
 	"github.com/juju/juju/api/upgrader"
@@ -154,6 +155,11 @@ func (st *State) Agent() *agent.State {
 // Upgrader returns access to the Upgrader API
 func (st *State) Upgrader() *upgrader.State {
 	return upgrader.NewState(st)
+}
+
+// Reboot returns access to the Reboot API
+func (st *State) Reboot() *reboot.State {
+	return reboot.NewState(st)
 }
 
 // Deployer returns access to the Deployer API
