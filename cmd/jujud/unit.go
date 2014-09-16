@@ -120,7 +120,7 @@ func (a *UnitAgent) APIWorkers() (worker.Worker, error) {
 		return workerlogger.NewLogger(st.Logger(), agentConfig), nil
 	})
 	runner.StartWorker("uniter", func() (worker.Worker, error) {
-		return uniter.NewUniter(st.Uniter(), entity.Tag(), dataDir, hookLock), nil
+		return uniter.NewUniter(st.Uniter(), st.Reboot(), entity.Tag(), dataDir, hookLock), nil
 	})
 	runner.StartWorker("apiaddressupdater", func() (worker.Worker, error) {
 		return apiaddressupdater.NewAPIAddressUpdater(st.Uniter(), a), nil
