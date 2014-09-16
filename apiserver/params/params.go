@@ -824,3 +824,7 @@ type FindToolsResult struct {
 	List  tools.List
 	Error *Error
 }
+
+type RebootActionResult struct {
+	Result RebootAction
+}
