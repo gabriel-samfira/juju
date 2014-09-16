@@ -566,9 +566,26 @@ func (u *Uniter) runHook(hi hook.Info) (err error) {
 	if IsMissingHookError(err) {
 		ranHook = false
 	} else if err != nil {
-		logger.Errorf("hook failed: %s", err)
-		u.notifyHookFailed(hookName, hctx)
-		return errHookFailed
+		switch hctx.rebootPrio {
+		case jujuc.RebootNow:
+			// An immediate reboot was requested. Requeue the hook for next start
+			if err := u.writeState(RunHook, Queued, &hi, nil); err != nil {
+				return err
+			}
+			// set the reboot flag on the machine agent
+			errR := hctx.unit.RequestReboot()
+			if errR != nil {
+				logger.Infof("RequestReboot returned error: %v", errR)
+				return errR
+			}
+			u.hookLock.Unlock()
+			logger.Infof("Returning ErrRebootMachine")
+			return worker.ErrRebootMachine
+		default:
+			logger.Errorf("hook failed: %s", err)
+			u.notifyHookFailed(hookName, hctx)
+			return errHookFailed
+		}
 	}
 	if err := u.writeState(RunHook, Done, &hi, nil); err != nil {
 		return err
@@ -579,7 +596,25 @@ func (u *Uniter) runHook(hi hook.Info) (err error) {
 	} else {
 		logger.Infof("skipped %q hook (missing)", hookName)
 	}
-	return u.commitHook(hi)
+
+	err = u.commitHook(hi)
+	if err != nil {
+		return err
+	}
+
+	if hctx.rebootPrio != jujuc.RebootSkip {
+		// a reboot was requested within this hook.
+		// set the reboot flag on the machine agent
+		errR := hctx.unit.RequestReboot()
+		if errR != nil {
+			logger.Infof("RequestReboot returned error: %v", errR)
+			return errR
+		}
+		u.hookLock.Unlock()
+		logger.Infof("Returning ErrRebootMachine")
+		return worker.ErrRebootMachine
+	}
+	return nil
 }
 
 // commitHook ensures that state is consistent with the supplied hook, and
