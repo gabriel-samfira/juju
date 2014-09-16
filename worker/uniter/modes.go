@@ -409,7 +409,7 @@ func modeContext(name string, err *error) func() {
 	return func() {
 		logger.Debugf("%s exiting", name)
 		switch *err {
-		case nil, tomb.ErrDying, worker.ErrTerminateAgent:
+		case nil, tomb.ErrDying, worker.ErrTerminateAgent, worker.ErrRebootMachine:
 		default:
 			*err = stderrors.New(name + ": " + (*err).Error())
 		}

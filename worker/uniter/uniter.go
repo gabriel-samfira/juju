@@ -25,6 +25,7 @@ import (
 	"launchpad.net/tomb"
 
 	"github.com/juju/juju/agent/tools"
+	"github.com/juju/juju/api/reboot"
 	"github.com/juju/juju/api/uniter"
 	apiwatcher "github.com/juju/juju/api/watcher"
 	"github.com/juju/juju/apiserver/params"
@@ -62,6 +63,7 @@ type UniterExecutionObserver interface {
 type Uniter struct {
 	tomb          tomb.Tomb
 	st            *uniter.State
+	reboot        *reboot.State
 	f             *filter
 	unit          *uniter.Unit
 	service       *uniter.Service
@@ -94,9 +96,10 @@ type Uniter struct {
 // NewUniter creates a new Uniter which will install, run, and upgrade
 // a charm on behalf of the unit with the given unitTag, by executing
 // hooks and operations provoked by changes in st.
-func NewUniter(st *uniter.State, unitTag string, dataDir string, hookLock *fslock.Lock) *Uniter {
+func NewUniter(st *uniter.State, reboot *reboot.State, unitTag string, dataDir string, hookLock *fslock.Lock) *Uniter {
 	u := &Uniter{
 		st:       st,
+		reboot:   reboot,
 		dataDir:  dataDir,
 		hookLock: hookLock,
 	}
@@ -374,7 +377,7 @@ func (u *Uniter) getHookContext(hctxId string, relationId int, remoteUnitName st
 
 	// Make a copy of the proxy settings.
 	proxySettings := u.proxy
-	return NewHookContext(u.unit, hctxId, u.uuid, u.envName, relationId,
+	return NewHookContext(u.unit, u.reboot, hctxId, u.uuid, u.envName, relationId,
 		remoteUnitName, ctxRelations, apiAddrs, ownerTag, proxySettings,
 		actionParams)
 }
@@ -563,9 +566,26 @@ func (u *Uniter) runHook(hi hook.Info) (err error) {
 	if IsMissingHookError(err) {
 		ranHook = false
 	} else if err != nil {
-		logger.Errorf("hook failed: %s", err)
-		u.notifyHookFailed(hookName, hctx)
-		return errHookFailed
+		switch hctx.rebootPrio {
+		case jujuc.RebootNow:
+			// An immediate reboot was requested. Requeue the hook for next start
+			if err := u.writeState(RunHook, Queued, &hi, nil); err != nil {
+				return err
+			}
+			// set the reboot flag on the machine agent
+			errR := hctx.reboot.RequestReboot()
+			if errR != nil {
+				logger.Infof("RequestReboot returned error: %v", errR)
+				return errR
+			}
+			u.hookLock.Unlock()
+			logger.Infof("Returning ErrRebootMachine")
+			return worker.ErrRebootMachine
+		default:
+			logger.Errorf("hook failed: %s", err)
+			u.notifyHookFailed(hookName, hctx)
+			return errHookFailed
+		}
 	}
 	if err := u.writeState(RunHook, Done, &hi, nil); err != nil {
 		return err
@@ -576,7 +596,25 @@ func (u *Uniter) runHook(hi hook.Info) (err error) {
 	} else {
 		logger.Infof("skipped %q hook (missing)", hookName)
 	}
-	return u.commitHook(hi)
+
+	err = u.commitHook(hi)
+	if err != nil {
+		return err
+	}
+
+	if hctx.rebootPrio != jujuc.RebootSkip {
+		// a reboot was requested within this hook.
+		// set the reboot flag on the machine agent
+		errR := hctx.reboot.RequestReboot()
+		if errR != nil {
+			logger.Infof("RequestReboot returned error: %v", errR)
+			return errR
+		}
+		u.hookLock.Unlock()
+		logger.Infof("Returning ErrRebootMachine")
+		return worker.ErrRebootMachine
+	}
+	return nil
 }
 
 // commitHook ensures that state is consistent with the supplied hook, and
