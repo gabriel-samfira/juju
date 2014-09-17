@@ -133,6 +133,12 @@ func (s *uniterSuite) TestRequestReboot(c *gc.C) {
 	c.Assert(rFlag, jc.IsFalse)
 }
 
+func (s *uniterSuite) TestAssignedMachine(c *gc.C) {
+	strResult, err := s.uniter.AssignedMachine()
+	c.Assert(err, gc.IsNil)
+	c.Assert(strResult, gc.Equals, s.machine0.Tag().String())
+}
+
 func (s *uniterSuite) TestUniterFailsWithNonUnitAgentUser(c *gc.C) {
 	anAuthorizer := s.authorizer
 	anAuthorizer.Tag = names.NewMachineTag("9")
