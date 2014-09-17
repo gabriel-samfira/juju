@@ -2001,14 +2001,14 @@ func (m *Machine) WatchForRebootEvent() (NotifyWatcher, error) {
 	return newRebootWatcher(m.st, machines), nil
 }
 
-type rebootWarcher struct {
+type rebootWatcher struct {
 	commonWatcher
 	machines set.Strings
 	out      chan struct{}
 }
 
 func newRebootWatcher(st *State, machines set.Strings) NotifyWatcher {
-	w := &rebootWarcher{
+	w := &rebootWatcher{
 		commonWatcher: commonWatcher{st: st},
 		machines:      machines,
 		out:           make(chan struct{}),
@@ -2021,12 +2021,12 @@ func newRebootWatcher(st *State, machines set.Strings) NotifyWatcher {
 	return w
 }
 
-// Changes returns the event channel for the rebootWarcher.
-func (w *rebootWarcher) Changes() <-chan struct{} {
+// Changes returns the event channel for the rebootWatcher.
+func (w *rebootWatcher) Changes() <-chan struct{} {
 	return w.out
 }
 
-func (w *rebootWarcher) loop() error {
+func (w *rebootWatcher) loop() error {
 	in := make(chan watcher.Change)
 	filter := func(key interface{}) bool {
 		id := key.(string)

@@ -36,13 +36,6 @@ type Machine struct {
 	presence.Presencer
 }
 
-// rebootDoc will hold the reboot flag for a machine
-type rebootDoc struct {
-	Id         string `bson:"_id"`
-	TxnRevno   int64  `bson:"txn-revno"`
-	RebootFlag bool
-}
-
 // MachineJob values define responsibilities that machines may be
 // expected to fulfil.
 type MachineJob int
@@ -62,24 +55,6 @@ var jobNames = map[MachineJob]params.MachineJob{
 
 	// Deprecated in 1.18.
 	JobManageStateDeprecated: params.JobManageStateDeprecated,
-}
-
-func addRebootDocOps(st *State,
-	machineId string,
-	reboot bool) []txn.Op {
-
-	id := machineId
-	ops := []txn.Op{{
-		C:      machinesC,
-		Id:     machineId,
-		Assert: notDeadDoc,
-	}, {
-		C:      rebootC,
-		Id:     id,
-		Assert: txn.DocMissing,
-		Insert: rebootDoc{Id: id, RebootFlag: reboot},
-	}}
-	return ops
 }
 
 // AllJobs returns all supported machine jobs.
@@ -164,98 +139,6 @@ func (m *Machine) Id() string {
 // Series returns the operating system series running on the machine.
 func (m *Machine) Series() string {
 	return m.doc.Series
-}
-
-func (m *Machine) SetRebootFlag(flag bool) error {
-	reboot, closer := m.st.getCollection(rebootC)
-	defer closer()
-	var buildTxn func(attempt int) ([]txn.Op, error)
-
-	var rDoc rebootDoc
-	err := reboot.FindId(m.Id()).One(&rDoc)
-	if err == mgo.ErrNotFound {
-		buildTxn = func(attempt int) ([]txn.Op, error) {
-			return addRebootDocOps(m.st, m.Id(), flag), nil
-		}
-	} else if err != nil {
-		return fmt.Errorf("cannot get reboot doc %v: %v", m.Id(), err)
-	} else {
-		buildTxn = func(attempt int) ([]txn.Op, error) {
-			ops := []txn.Op{{
-				C:      machinesC,
-				Id:     m.Id(),
-				Assert: notDeadDoc,
-			}, {
-				C:      rebootC,
-				Id:     m.Id(),
-				Assert: bson.D{{"txn-revno", rDoc.TxnRevno}},
-				Update: bson.D{{"$set", bson.D{{"rebootflag", flag}}}},
-			}}
-			return ops, nil
-		}
-	}
-	// Run the transaction using the state transaction runner.
-	err = m.st.run(buildTxn)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// GetRebootFlag returns the reboot flag for this machine
-func (m *Machine) GetRebootFlag() (bool, error) {
-	rebootCol, closer := m.st.getCollection(rebootC)
-	defer closer()
-
-	var rDoc rebootDoc
-
-	err := rebootCol.FindId(m.Id()).One(&rDoc)
-	if err == mgo.ErrNotFound {
-		return false, errors.NotFoundf("reboot document %v", m.Id())
-	} else if err != nil {
-		return false, fmt.Errorf("cannot find reboot doc %v: %v", m.Id(), err)
-	}
-	return rDoc.RebootFlag, nil
-}
-
-func (m *Machine) machinesToCareAboutRebootsFor() []string {
-	var possibleIds []string
-	for currentId := m.Id(); currentId != ""; {
-		possibleIds = append(possibleIds, currentId)
-		currentId = ParentId(currentId)
-	}
-	return possibleIds
-}
-
-// TODO (gsamfira): Check if the current node should reboot or shutdown
-// If we are a container, and our parent needs to reboot, this should return:
-// ShouldShutdown
-func (m *Machine) ShouldRebootOrShutdown() (params.RebootAction, error) {
-	rebootCol, closer := m.st.getCollection(rebootC)
-	defer closer()
-
-	machines := m.machinesToCareAboutRebootsFor()
-
-	docs := []rebootDoc{}
-	sel := bson.D{{"_id", bson.D{{"$in", machines}}}}
-	if err := rebootCol.Find(sel).All(&docs); err != nil {
-		return params.ShouldDoNothing, err
-	}
-
-	iNeedReboot := false
-	for _, val := range docs {
-		if val.RebootFlag == true {
-			if val.Id != m.doc.Id {
-				return params.ShouldShutdown, nil
-			} else {
-				iNeedReboot = true
-			}
-		}
-	}
-	if iNeedReboot {
-		return params.ShouldReboot, nil
-	}
-	return params.ShouldDoNothing, nil
 }
 
 // ContainerType returns the type of container hosting this machine.
