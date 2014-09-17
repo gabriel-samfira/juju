@@ -14,6 +14,17 @@ import (
 	"github.com/juju/juju/apiserver/params"
 )
 
+type RebootPriority int
+
+const (
+	// noop
+	RebootSkip RebootPriority = iota
+	// wait for current hook to finish before rebooting
+	RebootAfterHook
+	// reboot immediately, killing and requeueing the calling hook
+	RebootNow
+)
+
 // Context is the interface that all hook helper commands
 // depend on to interact with the rest of the system.
 type Context interface {
@@ -63,6 +74,9 @@ type Context interface {
 
 	// AddMetric records a metric to return after hook execution.
 	AddMetrics(string, string, time.Time) error
+
+	// RequestReboot will set the reboot flag to true on the machine agent
+	RequestReboot(prio RebootPriority) error
 }
 
 // ContextRelation expresses the capabilities of a hook with respect to a relation.
