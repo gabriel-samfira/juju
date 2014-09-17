@@ -476,6 +476,19 @@ func (u *Unit) WatchActions() (watcher.StringsWatcher, error) {
 	return w, nil
 }
 
+// AssignedMachine returns the tag of the machine agent this unit is assigned to
+func (u *Unit) AssignedMachine() (string, error) {
+	var result params.StringResult
+	err := u.st.facade.FacadeCall("AssignedMachine", nil, &result)
+	if err != nil {
+		return "", err
+	}
+	if err := result.Error; err != nil {
+		return "", err
+	}
+	return result.Result, nil
+}
+
 // JoinedRelations returns the tags of the relations the unit has joined.
 func (u *Unit) JoinedRelations() ([]string, error) {
 	var results params.StringsResults
