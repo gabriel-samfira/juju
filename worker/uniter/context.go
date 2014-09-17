@@ -543,10 +543,16 @@ func (ctx *HookContext) runCharmHook(hookName, charmDir string, env []string, ch
 	}
 	go hookLogger.run()
 	err = ps.Start()
+	// Record the Pid of the hook
+	if ps.Process != nil {
+		ctx.pid = ps.Process.Pid
+	}
 	outWriter.Close()
 	if err == nil {
 		err = ps.Wait()
 	}
+	// clear the pid as it no longer reflects the hook.
+	ctx.pid = 0
 	hookLogger.stop()
 	return err
 }
