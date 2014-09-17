@@ -47,9 +47,10 @@ func NewUniterAPI(st *state.State, resources *common.Resources, authorizer commo
 		return nil, common.ErrPerm
 	}
 	var unit *state.Unit
+	var err error
 	switch tag := authorizer.GetAuthTag().(type) {
 	case names.UnitTag:
-		unit, err := st.Unit(tag.Id())
+		unit, err = st.Unit(tag.Id())
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -1339,11 +1340,11 @@ func (u *UniterAPI) AssignedMachine() (params.StringResult, error) {
 	result := params.StringResult{}
 	machineId, err := u.unit.AssignedMachineId()
 	if err != nil {
-		return nil, errors.Trace(err)
+		return params.StringResult{}, errors.Trace(err)
 	}
 	machine, err := u.st.Machine(machineId)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return params.StringResult{}, errors.Trace(err)
 	}
 	result.Result = machine.Tag().String()
 	return result, nil
