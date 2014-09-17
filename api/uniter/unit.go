@@ -476,8 +476,8 @@ func (u *Unit) WatchActions() (watcher.StringsWatcher, error) {
 	return w, nil
 }
 
-// AssignedMachine returns the tag of the machine agent this unit is assigned to
-func (u *Unit) AssignedMachine() (string, error) {
+// assignedMachine returns the tag of the machine agent this unit is assigned to
+func (u *Unit) assignedMachine() (string, error) {
 	var result params.StringResult
 	err := u.st.facade.FacadeCall("AssignedMachine", nil, &result)
 	if err != nil {
@@ -487,6 +487,23 @@ func (u *Unit) AssignedMachine() (string, error) {
 		return "", err
 	}
 	return result.Result, nil
+}
+
+// RequestReboot sets the reboot flag for its machine agent
+func (u *Unit) RequestReboot() error {
+	machineId, err := u.assignedMachine()
+	if err != nil {
+		return err
+	}
+	var result params.ErrorResults
+	args := params.Entities{
+		Entities: []params.Entity{{Tag: machineId}},
+	}
+	err = u.st.facade.FacadeCall("RequestReboot", args, &result)
+	if err != nil {
+		return err
+	}
+	return result.OneError()
 }
 
 // JoinedRelations returns the tags of the relations the unit has joined.
