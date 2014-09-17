@@ -265,6 +265,50 @@ func mergeEnvironment(env []string) []string {
 	return tmpEnv
 }
 
+// killCharmHook tries to kill the current running charm hook.
+func (ctx *HookContext) killCharmHook() error {
+	logger.Infof("Trying to kill: %v", ctx.pid)
+	if ctx.pid == 0 {
+		// nothing to kill
+		return nil
+	}
+
+	p, err := os.FindProcess(ctx.pid)
+	if err != nil {
+		logger.Errorf("Process with pid %v could not be found: %v", ctx.pid, err)
+		return err
+	}
+
+	err = p.Kill()
+	if err != nil {
+		logger.Errorf("Failed to kill process %v: %v", ctx.pid, err)
+		return err
+	}
+
+	c := make(chan error, 1)
+	go func() {
+		for {
+			if ctx.pid == 0 {
+				c <- nil
+				return
+			}
+			if _, err := os.FindProcess(ctx.pid); err != nil {
+				c <- nil
+				return
+			}
+			time.Sleep(5 * time.Second)
+		}
+	}()
+	// wait for hook to die
+	select {
+	case <-time.After(30 * time.Second):
+		return errors.New("Failed to kill hook after 30 seconds")
+	case err := <-c:
+		return err
+	}
+	return nil
+}
+
 // windowsEnv adds windows specific environment variables. PSModulePath
 // helps hooks use normal imports instead of dot sourcing modules
 // its a convenience variable. The PATH variable delimiter is
@@ -366,11 +410,6 @@ func (ctx *HookContext) finalizeContext(process string, err error) error {
 		ctx.metrics = nil
 	}
 	return err
-}
-
-func (ctx *HookContext) requestReboot() (string, error) {
-	// machineId, err := ctx.unit.A
-	return "", nil
 }
 
 // RunCommands executes the commands in an environment which allows it to to
