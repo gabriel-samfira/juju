@@ -141,6 +141,19 @@ func (st *State) ProviderType() (string, error) {
 	return result.Result, nil
 }
 
+// AssignedMachine returns the tag of the machine agent this unit is assigned to
+func (st *State) AssignedMachine() (string, error) {
+	var result params.StringResult
+	err := st.facade.FacadeCall("AssignedMachine", nil, &result)
+	if err != nil {
+		return "", err
+	}
+	if err := result.Error; err != nil {
+		return "", err
+	}
+	return result.Result, nil
+}
+
 // Charm returns the charm with the given URL.
 func (st *State) Charm(curl *charm.URL) (*Charm, error) {
 	if curl == nil {
