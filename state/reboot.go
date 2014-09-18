@@ -11,6 +11,8 @@ import (
 	"github.com/juju/juju/apiserver/params"
 )
 
+var _ RebootFlagSetter = (*Machine)(nil)
+
 // rebootDoc will hold the reboot flag for a machine.
 type rebootDoc struct {
 	Id string `bson:"_id"`
@@ -119,4 +121,8 @@ func (m *Machine) ShouldRebootOrShutdown() (params.RebootAction, error) {
 		return params.ShouldReboot, nil
 	}
 	return params.ShouldDoNothing, nil
+}
+
+type RebootFlagSetter interface {
+	SetRebootFlag(flag bool) error
 }
