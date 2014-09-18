@@ -55,10 +55,6 @@ func (dummyHookContext) RelationIds() []int {
 	return []int{}
 }
 
-func (dummyHookContext) RequestReboot(prio jujuc.RebootPriority) error {
-	return nil
-}
-
 func (dummyHookContext) OwnerTag() string {
 	return ""
 }
