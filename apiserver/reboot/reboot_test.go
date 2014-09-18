@@ -22,7 +22,9 @@ type machines struct {
 	authorizer apiservertesting.FakeAuthorizer
 	resources  *common.Resources
 
-	rebootAPI reboot.Rebooter
+	rebootAPI *reboot.RebootAPI
+
+	args params.Entities
 }
 
 type rebootSuite struct {
@@ -47,7 +49,11 @@ func (s *rebootSuite) setUpMachine(c *gc.C, machine *state.Machine) *machines {
 	rebootAPI, err := reboot.NewRebootAPI(s.State, resources, authorizer)
 	c.Assert(err, gc.IsNil)
 
-	return &machines{machine, authorizer, resources, rebootAPI}
+	args := params.Entities{Entities: []params.Entity{
+		{Tag: machine.Tag().String()},
+	}}
+
+	return &machines{machine, authorizer, resources, rebootAPI, args}
 }
 
 func (s *rebootSuite) SetUpTest(c *gc.C) {
@@ -123,15 +129,21 @@ func (s *rebootSuite) TestRequestReboot(c *gc.C) {
 	wc := statetesting.NewNotifyWatcherC(c, s.State, w)
 	wc.AssertNoChange()
 
-	errResult, err := s.machine.rebootAPI.RequestReboot()
+	errResult, err := s.machine.rebootAPI.RequestReboot(s.machine.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(errResult.Error, gc.IsNil)
+	c.Assert(errResult, gc.DeepEquals, params.ErrorResults{
+		Results: []params.ErrorResult{
+			{Error: nil},
+		}})
 
 	wc.AssertOneChange()
 
-	res, err := s.machine.rebootAPI.GetRebootAction()
+	res, err := s.machine.rebootAPI.GetRebootAction(s.machine.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.Result, gc.Equals, params.ShouldReboot)
+	c.Assert(res, gc.DeepEquals, params.RebootActionResults{
+		Results: []params.RebootActionResult{
+			{Result: params.ShouldReboot},
+		}})
 
 	statetesting.AssertStop(c, w)
 	wc.AssertClosed()
@@ -150,23 +162,37 @@ func (s *rebootSuite) TestClearReboot(c *gc.C) {
 	wc := statetesting.NewNotifyWatcherC(c, s.State, w)
 	wc.AssertNoChange()
 
-	errResult, err := s.machine.rebootAPI.RequestReboot()
+	errResult, err := s.machine.rebootAPI.RequestReboot(s.machine.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(errResult.Error, gc.IsNil)
+	c.Assert(errResult, gc.DeepEquals, params.ErrorResults{
+		Results: []params.ErrorResult{
+			{Error: nil},
+		},
+	})
 
 	wc.AssertOneChange()
 
-	res, err := s.machine.rebootAPI.GetRebootAction()
+	res, err := s.machine.rebootAPI.GetRebootAction(s.machine.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.Result, gc.Equals, params.ShouldReboot)
+	c.Assert(res, gc.DeepEquals, params.RebootActionResults{
+		Results: []params.RebootActionResult{
+			{Result: params.ShouldReboot},
+		}})
 
-	errResult, err = s.machine.rebootAPI.ClearReboot()
+	errResult, err = s.machine.rebootAPI.ClearReboot(s.machine.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(errResult.Error, gc.IsNil)
+	c.Assert(errResult, gc.DeepEquals, params.ErrorResults{
+		Results: []params.ErrorResult{
+			{Error: nil},
+		},
+	})
 
-	res, err = s.machine.rebootAPI.GetRebootAction()
+	res, err = s.machine.rebootAPI.GetRebootAction(s.machine.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.Result, gc.Equals, params.ShouldDoNothing)
+	c.Assert(res, gc.DeepEquals, params.RebootActionResults{
+		Results: []params.RebootActionResult{
+			{Result: params.ShouldDoNothing},
+		}})
 
 	statetesting.AssertStop(c, w)
 	wc.AssertClosed()
@@ -216,29 +242,45 @@ func (s *rebootSuite) TestWatchForRebootEventFromContainer(c *gc.C) {
 	// machine should reboot
 	// container should shutdown
 	// nested container should shutdown
-	errResult, err := s.machine.rebootAPI.RequestReboot()
+	errResult, err := s.machine.rebootAPI.RequestReboot(s.machine.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(errResult.Error, gc.IsNil)
+	c.Assert(errResult, gc.DeepEquals, params.ErrorResults{
+		Results: []params.ErrorResult{
+			{Error: nil},
+		}})
 
 	wc.AssertOneChange()
 	wcContainer.AssertOneChange()
 	wcNestedContainer.AssertOneChange()
 
-	res, err := s.machine.rebootAPI.GetRebootAction()
+	res, err := s.machine.rebootAPI.GetRebootAction(s.machine.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.Result, gc.Equals, params.ShouldReboot)
+	c.Assert(res, gc.DeepEquals, params.RebootActionResults{
+		Results: []params.RebootActionResult{
+			{Result: params.ShouldReboot},
+		}})
 
-	res, err = s.container.rebootAPI.GetRebootAction()
+	res, err = s.container.rebootAPI.GetRebootAction(s.container.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.Result, gc.Equals, params.ShouldShutdown)
+	c.Assert(res, gc.DeepEquals, params.RebootActionResults{
+		Results: []params.RebootActionResult{
+			{Result: params.ShouldShutdown},
+		}})
 
-	res, err = s.nestedContainer.rebootAPI.GetRebootAction()
+	res, err = s.nestedContainer.rebootAPI.GetRebootAction(s.nestedContainer.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.Result, gc.Equals, params.ShouldShutdown)
+	c.Assert(res, gc.DeepEquals, params.RebootActionResults{
+		Results: []params.RebootActionResult{
+			{Result: params.ShouldShutdown},
+		}})
 
-	errResult, err = s.machine.rebootAPI.ClearReboot()
+	errResult, err = s.machine.rebootAPI.ClearReboot(s.machine.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(errResult.Error, gc.IsNil)
+	c.Assert(errResult, gc.DeepEquals, params.ErrorResults{
+		Results: []params.ErrorResult{
+			{Error: nil},
+		},
+	})
 
 	wc.AssertOneChange()
 	wcContainer.AssertOneChange()
@@ -248,29 +290,45 @@ func (s *rebootSuite) TestWatchForRebootEventFromContainer(c *gc.C) {
 	// machine should do nothing
 	// container should reboot
 	// nested container should shutdown
-	errResult, err = s.container.rebootAPI.RequestReboot()
+	errResult, err = s.container.rebootAPI.RequestReboot(s.container.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(errResult.Error, gc.IsNil)
+	c.Assert(errResult, gc.DeepEquals, params.ErrorResults{
+		Results: []params.ErrorResult{
+			{Error: nil},
+		}})
 
 	wc.AssertNoChange()
 	wcContainer.AssertOneChange()
 	wcNestedContainer.AssertOneChange()
 
-	res, err = s.machine.rebootAPI.GetRebootAction()
+	res, err = s.machine.rebootAPI.GetRebootAction(s.machine.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.Result, gc.Equals, params.ShouldDoNothing)
+	c.Assert(res, gc.DeepEquals, params.RebootActionResults{
+		Results: []params.RebootActionResult{
+			{Result: params.ShouldDoNothing},
+		}})
 
-	res, err = s.container.rebootAPI.GetRebootAction()
+	res, err = s.container.rebootAPI.GetRebootAction(s.container.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.Result, gc.Equals, params.ShouldReboot)
+	c.Assert(res, gc.DeepEquals, params.RebootActionResults{
+		Results: []params.RebootActionResult{
+			{Result: params.ShouldReboot},
+		}})
 
-	res, err = s.nestedContainer.rebootAPI.GetRebootAction()
+	res, err = s.nestedContainer.rebootAPI.GetRebootAction(s.nestedContainer.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.Result, gc.Equals, params.ShouldShutdown)
+	c.Assert(res, gc.DeepEquals, params.RebootActionResults{
+		Results: []params.RebootActionResult{
+			{Result: params.ShouldShutdown},
+		}})
 
-	errResult, err = s.container.rebootAPI.ClearReboot()
+	errResult, err = s.container.rebootAPI.ClearReboot(s.container.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(errResult.Error, gc.IsNil)
+	c.Assert(errResult, gc.DeepEquals, params.ErrorResults{
+		Results: []params.ErrorResult{
+			{Error: nil},
+		},
+	})
 
 	wc.AssertNoChange()
 	wcContainer.AssertOneChange()
@@ -280,29 +338,45 @@ func (s *rebootSuite) TestWatchForRebootEventFromContainer(c *gc.C) {
 	// machine should do nothing
 	// container should do nothing
 	// nested container should reboot
-	errResult, err = s.nestedContainer.rebootAPI.RequestReboot()
+	errResult, err = s.nestedContainer.rebootAPI.RequestReboot(s.nestedContainer.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(errResult.Error, gc.IsNil)
+	c.Assert(errResult, gc.DeepEquals, params.ErrorResults{
+		Results: []params.ErrorResult{
+			{Error: nil},
+		}})
 
 	wc.AssertNoChange()
 	wcContainer.AssertNoChange()
 	wcNestedContainer.AssertOneChange()
 
-	res, err = s.machine.rebootAPI.GetRebootAction()
+	res, err = s.machine.rebootAPI.GetRebootAction(s.machine.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.Result, gc.Equals, params.ShouldDoNothing)
+	c.Assert(res, gc.DeepEquals, params.RebootActionResults{
+		Results: []params.RebootActionResult{
+			{Result: params.ShouldDoNothing},
+		}})
 
-	res, err = s.container.rebootAPI.GetRebootAction()
+	res, err = s.container.rebootAPI.GetRebootAction(s.container.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.Result, gc.Equals, params.ShouldDoNothing)
+	c.Assert(res, gc.DeepEquals, params.RebootActionResults{
+		Results: []params.RebootActionResult{
+			{Result: params.ShouldDoNothing},
+		}})
 
-	res, err = s.nestedContainer.rebootAPI.GetRebootAction()
+	res, err = s.nestedContainer.rebootAPI.GetRebootAction(s.nestedContainer.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(res.Result, gc.Equals, params.ShouldReboot)
+	c.Assert(res, gc.DeepEquals, params.RebootActionResults{
+		Results: []params.RebootActionResult{
+			{Result: params.ShouldReboot},
+		}})
 
-	errResult, err = s.nestedContainer.rebootAPI.ClearReboot()
+	errResult, err = s.nestedContainer.rebootAPI.ClearReboot(s.nestedContainer.args)
 	c.Assert(err, gc.IsNil)
-	c.Assert(errResult.Error, gc.IsNil)
+	c.Assert(errResult, gc.DeepEquals, params.ErrorResults{
+		Results: []params.ErrorResult{
+			{Error: nil},
+		},
+	})
 
 	wc.AssertNoChange()
 	wcContainer.AssertNoChange()

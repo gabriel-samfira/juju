@@ -31,6 +31,7 @@ type UniterAPI struct {
 	*common.AgentEntityWatcher
 	*common.APIAddresser
 	*common.EnvironWatcher
+	*common.RebootRequester
 
 	st            *state.State
 	auth          common.Authorizer
@@ -63,6 +64,30 @@ func NewUniterAPI(st *state.State, resources *common.Resources, authorizer commo
 			return nil, errors.Errorf("expected names.UnitTag, got %T", tag)
 		}
 	}
+
+	accessMachine := func() (common.AuthFunc, error) {
+		switch tag := authorizer.GetAuthTag().(type) {
+		case names.UnitTag:
+			entity, err := st.Unit(tag.Id())
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			machineId, err := entity.AssignedMachineId()
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			machine, err := st.Machine(machineId)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			return func(tag names.Tag) bool {
+				return tag == machine.Tag()
+			}, nil
+		default:
+			return nil, errors.Errorf("expected names.UnitTag, got %T", tag)
+		}
+	}
+
 	accessUnitOrService := common.AuthEither(accessUnit, accessService)
 	return &UniterAPI{
 		LifeGetter:         common.NewLifeGetter(st, accessUnitOrService),
@@ -71,6 +96,7 @@ func NewUniterAPI(st *state.State, resources *common.Resources, authorizer commo
 		AgentEntityWatcher: common.NewAgentEntityWatcher(st, resources, accessUnitOrService),
 		APIAddresser:       common.NewAPIAddresser(st, resources),
 		EnvironWatcher:     common.NewEnvironWatcher(st, resources, authorizer),
+		RebootRequester:    common.NewRebootRequester(st, accessMachine),
 
 		st:            st,
 		auth:          authorizer,

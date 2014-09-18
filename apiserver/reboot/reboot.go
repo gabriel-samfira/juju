@@ -19,6 +19,10 @@ var logger = loggo.GetLogger("juju.apiserver.reboot")
 
 // RebootAPI provides access to the Upgrader API facade.
 type RebootAPI struct {
+	*common.RebootActionGetter
+	*common.RebootRequester
+	*common.RebootFlagClearer
+
 	auth      common.Authorizer
 	st        *state.State
 	machine   *state.Machine
@@ -26,38 +30,7 @@ type RebootAPI struct {
 }
 
 func init() {
-	common.RegisterStandardFacade("Reboot", 0, newRebootFacade)
-}
-
-type Rebooter interface {
-	WatchForRebootEvent() (params.NotifyWatchResult, error)
-	RequestReboot() (params.ErrorResult, error)
-	ClearReboot() (params.ErrorResult, error)
-	GetRebootAction() (params.RebootActionResult, error)
-}
-
-// newRebootFacade returnes a Rebooter that allows both the unit agent and
-// the machine agent to access the reboot API
-// The unit agent should be able to request reboot, and watch its machine agent
-// reboot status but should not be able to clear the status. That operation should
-// be left to the machine agent before rebooting.
-func newRebootFacade(st *state.State,
-	resources *common.Resources,
-	auth common.Authorizer) (Rebooter, error) {
-
-	tag, err := names.ParseTag(auth.GetAuthTag().String())
-	if err != nil {
-		return nil, common.ErrPerm
-	}
-
-	switch tag.(type) {
-	case names.MachineTag:
-		return NewRebootAPI(st, resources, auth)
-	case names.UnitTag:
-		return NewUniterRebootAPI(st, resources, auth)
-	}
-	// Not a machine or unit.
-	return nil, common.ErrPerm
+	common.RegisterStandardFacade("Reboot", 0, NewRebootAPI)
 }
 
 // NewRebootAPI creates a new client-side RebootAPI facade.
@@ -65,7 +38,7 @@ func NewRebootAPI(
 	st *state.State,
 	resources *common.Resources,
 	auth common.Authorizer,
-) (Rebooter, error) {
+) (*RebootAPI, error) {
 	if !auth.AuthMachineAgent() {
 		return nil, common.ErrPerm
 	}
@@ -75,11 +48,19 @@ func NewRebootAPI(
 	if err != nil {
 		return nil, err
 	}
+
+	canAccess := func() (common.AuthFunc, error) {
+		return auth.AuthOwner, nil
+	}
+
 	return &RebootAPI{
-		st:        st,
-		machine:   machine,
-		resources: resources,
-		auth:      auth,
+		RebootActionGetter: common.NewRebootActionGetter(st, canAccess),
+		RebootRequester:    common.NewRebootRequester(st, canAccess),
+		RebootFlagClearer:  common.NewRebootFlagClearer(st, canAccess),
+		st:                 st,
+		machine:            machine,
+		resources:          resources,
+		auth:               auth,
 	}, nil
 }
 
@@ -109,33 +90,4 @@ func (r *RebootAPI) WatchForRebootEvent() (params.NotifyWatchResult, error) {
 	}
 	result.Error = common.ServerError(err)
 	return result, nil
-}
-
-// RequestReebot sets the reboot flag to true for the current machine.
-func (r *RebootAPI) RequestReboot() (params.ErrorResult, error) {
-	logger.Infof("Got reboot request from: %v", r.machine.Tag())
-	err := r.machine.SetRebootFlag(true)
-	if err != nil {
-		return params.ErrorResult{}, errors.Trace(err)
-	}
-	return params.ErrorResult{Error: common.ServerError(err)}, nil
-}
-
-// ClearReboot clears the reboot flag for the current machine.
-func (r *RebootAPI) ClearReboot() (params.ErrorResult, error) {
-	logger.Infof("Got clear reboot request from: %v", r.machine.Tag())
-	err := r.machine.SetRebootFlag(false)
-	if err != nil {
-		return params.ErrorResult{}, errors.Trace(err)
-	}
-	return params.ErrorResult{Error: common.ServerError(err)}, nil
-}
-
-// GetRebootAction gets the reboot flag for the current machine.
-func (r *RebootAPI) GetRebootAction() (params.RebootActionResult, error) {
-	rAction, err := r.machine.ShouldRebootOrShutdown()
-	if err != nil {
-		return params.RebootActionResult{Result: params.ShouldDoNothing}, errors.Trace(err)
-	}
-	return params.RebootActionResult{Result: rAction}, nil
 }
