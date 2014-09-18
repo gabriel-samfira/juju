@@ -12,6 +12,7 @@ import (
 )
 
 var _ RebootFlagSetter = (*Machine)(nil)
+var _ RebootActionGetter = (*Machine)(nil)
 
 // rebootDoc will hold the reboot flag for a machine.
 type rebootDoc struct {
@@ -126,3 +127,8 @@ func (m *Machine) ShouldRebootOrShutdown() (params.RebootAction, error) {
 type RebootFlagSetter interface {
 	SetRebootFlag(flag bool) error
 }
+
+type RebootActionGetter interface {
+   ShouldRebootOrShutdown() (params.RebootAction, error)
+}
+
