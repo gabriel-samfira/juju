@@ -13,14 +13,10 @@ import (
 
 // rebootDoc will hold the reboot flag for a machine.
 type rebootDoc struct {
-	Id         string `bson:"_id"`
-	RebootFlag bool
+	Id string `bson:"_id"`
 }
 
-func addRebootDocOps(st *State,
-	machineId string,
-	reboot bool) []txn.Op {
-
+func addRebootDocOps(machineId string) []txn.Op {
 	ops := []txn.Op{{
 		C:      machinesC,
 		Id:     machineId,
@@ -28,8 +24,16 @@ func addRebootDocOps(st *State,
 	}, {
 		C:      rebootC,
 		Id:     machineId,
-		Assert: txn.DocMissing,
-		Insert: rebootDoc{Id: machineId, RebootFlag: reboot},
+		Insert: rebootDoc{Id: machineId},
+	}}
+	return ops
+}
+
+func removeRebootDocOps(machineId string) []txn.Op {
+	ops := []txn.Op{{
+		C:      rebootC,
+		Id:     machineId,
+		Remove: true,
 	}}
 	return ops
 }
@@ -40,28 +44,19 @@ func addRebootDocOps(st *State,
 func (m *Machine) SetRebootFlag(flag bool) error {
 	reboot, closer := m.st.getCollection(rebootC)
 	defer closer()
-	var buildTxn func(attempt int) ([]txn.Op, error)
+	buildTxn := func(attempt int) ([]txn.Op, error) {
+		return addRebootDocOps(m.Id()), nil
+	}
 
 	var rDoc rebootDoc
 	err := reboot.FindId(m.Id()).One(&rDoc)
-	if err == mgo.ErrNotFound {
-		buildTxn = func(attempt int) ([]txn.Op, error) {
-			return addRebootDocOps(m.st, m.Id(), flag), nil
-		}
-	} else if err != nil {
-		return errors.Errorf("cannot get reboot doc %v: %v", m.Id(), err)
-	} else {
-		buildTxn = func(attempt int) ([]txn.Op, error) {
-			ops := []txn.Op{{
-				C:      machinesC,
-				Id:     m.Id(),
-				Assert: notDeadDoc,
-			}, {
-				C:      rebootC,
-				Id:     m.Id(),
-				Update: bson.D{{"$set", bson.D{{"rebootflag", flag}}}},
-			}}
-			return ops, nil
+	if flag == false {
+		if err == mgo.ErrNotFound {
+			return nil
+		} else {
+			buildTxn = func(attempt int) ([]txn.Op, error) {
+				return removeRebootDocOps(m.Id()), nil
+			}
 		}
 	}
 
@@ -82,11 +77,11 @@ func (m *Machine) GetRebootFlag() (bool, error) {
 
 	err := rebootCol.FindId(m.Id()).One(&rDoc)
 	if err == mgo.ErrNotFound {
-		return false, errors.NotFoundf("reboot document %v", m.Id())
+		return false, nil
 	} else if err != nil {
 		return false, fmt.Errorf("failed to get reboot doc %v: %v", m.Id(), err)
 	}
-	return rDoc.RebootFlag, nil
+	return true, nil
 }
 
 func (m *Machine) machinesToCareAboutRebootsFor() []string {
@@ -115,12 +110,10 @@ func (m *Machine) ShouldRebootOrShutdown() (params.RebootAction, error) {
 
 	iNeedReboot := false
 	for _, val := range docs {
-		if val.RebootFlag == true {
-			if val.Id != m.doc.Id {
-				return params.ShouldShutdown, nil
-			}
-			iNeedReboot = true
+		if val.Id != m.doc.Id {
+			return params.ShouldShutdown, nil
 		}
+		iNeedReboot = true
 	}
 	if iNeedReboot {
 		return params.ShouldReboot, nil
