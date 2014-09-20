@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 
+	"github.com/juju/errors"
 	"github.com/juju/names"
 
 	"github.com/juju/juju/api/agent"
@@ -158,8 +159,13 @@ func (st *State) Upgrader() *upgrader.State {
 }
 
 // Reboot returns access to the Reboot API
-func (st *State) Reboot() *reboot.State {
-	return reboot.NewState(st)
+func (st *State) Reboot() (*reboot.State, error) {
+	switch tag := st.authTag.(type) {
+	case names.MachineTag:
+		return reboot.NewState(st, tag), nil
+	default:
+		return nil, errors.Errorf("expected names.MachineTag, got %T", tag)
+	}
 }
 
 // Deployer returns access to the Deployer API

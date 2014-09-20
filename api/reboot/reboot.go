@@ -1,6 +1,9 @@
 package reboot
 
 import (
+	"github.com/juju/errors"
+	"github.com/juju/names"
+
 	"github.com/juju/juju/api/base"
 	"github.com/juju/juju/api/watcher"
 	"github.com/juju/juju/apiserver/params"
@@ -8,13 +11,18 @@ import (
 
 // State provides access to an upgrader worker's view of the state.
 type State struct {
-	facade base.FacadeCaller
+	machineTag names.Tag
+	facade     base.FacadeCaller
 }
 
 // NewState returns a version of the state that provides functionality
 // required by the upgrader worker.
-func NewState(caller base.APICaller) *State {
-	return &State{base.NewFacadeCaller(caller, "Reboot")}
+func NewState(caller base.APICaller, machineTag names.MachineTag) *State {
+
+	return &State{
+		facade:     base.NewFacadeCaller(caller, "Reboot"),
+		machineTag: machineTag,
+	}
 }
 
 func (st *State) WatchForRebootEvent() (watcher.NotifyWatcher, error) {
@@ -33,40 +41,65 @@ func (st *State) WatchForRebootEvent() (watcher.NotifyWatcher, error) {
 }
 
 func (st *State) RequestReboot() error {
-	var result params.ErrorResult
+	var results params.ErrorResults
+	args := params.Entities{
+		Entities: []params.Entity{{Tag: st.machineTag.String()}},
+	}
 
-	err := st.facade.FacadeCall("RequestReboot", nil, &result)
+	err := st.facade.FacadeCall("RequestReboot", args, &results)
 	if err != nil {
-		return err
-	}
-	if result.Error != nil {
-		return result.Error
+		return errors.Trace(err)
 	}
 
+	if len(results.Results) != 1 {
+		return errors.Errorf("expected 1 result, got %d", len(results.Results))
+	}
+
+	if results.Results[0].Error != nil {
+		return errors.Trace(results.Results[0].Error)
+	}
 	return nil
 }
 
 func (st *State) ClearReboot() error {
-	var result params.ErrorResult
-
-	err := st.facade.FacadeCall("ClearReboot", nil, &result)
-	if err != nil {
-		return err
+	var results params.ErrorResults
+	args := params.Entities{
+		Entities: []params.Entity{{Tag: st.machineTag.String()}},
 	}
-	if result.Error != nil {
-		return result.Error
+
+	err := st.facade.FacadeCall("ClearReboot", args, &results)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if len(results.Results) != 1 {
+		return errors.Errorf("expected 1 result, got %d", len(results.Results))
+	}
+
+	if results.Results[0].Error != nil {
+		return errors.Trace(results.Results[0].Error)
 	}
 
 	return nil
 }
 
 func (st *State) GetRebootAction() (params.RebootAction, error) {
-	var result params.RebootActionResult
+	var results params.RebootActionResults
+	args := params.Entities{
+		Entities: []params.Entity{{Tag: st.machineTag.String()}},
+	}
 
-	err := st.facade.FacadeCall("GetRebootAction", nil, &result)
+	err := st.facade.FacadeCall("GetRebootAction", args, &results)
 	if err != nil {
 		return params.ShouldDoNothing, err
 	}
+	if len(results.Results) != 1 {
+		return params.ShouldDoNothing, errors.Errorf("expected 1 result, got %d", len(results.Results))
+	}
 
-	return result.Result, nil
+	if results.Results[0].Error != nil {
+		return params.ShouldDoNothing, errors.Trace(results.Results[0].Error)
+	}
+
+	return results.Results[0].Result, nil
 }
