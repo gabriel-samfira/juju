@@ -58,7 +58,7 @@ func (r *Reboot) Handle() error {
 	case params.ShouldReboot:
 		return worker.ErrRebootMachine
 	case params.ShouldShutdown:
-		return worker.ErrRebootMachine
+		return worker.ErrShutdownMachine
 	}
 	return nil
 }
