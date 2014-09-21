@@ -31,6 +31,7 @@ import (
 	"github.com/juju/juju/api/metricsmanager"
 	"github.com/juju/juju/apiserver"
 	"github.com/juju/juju/apiserver/params"
+	"github.com/juju/juju/cmd/jujud/reboot"
 	"github.com/juju/juju/container/kvm"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/instance"
@@ -62,6 +63,7 @@ import (
 	"github.com/juju/juju/worker/networker"
 	"github.com/juju/juju/worker/peergrouper"
 	"github.com/juju/juju/worker/provisioner"
+	rebootworker "github.com/juju/juju/worker/reboot"
 	"github.com/juju/juju/worker/resumer"
 	"github.com/juju/juju/worker/rsyslog"
 	"github.com/juju/juju/worker/singular"
@@ -250,10 +252,58 @@ func (a *MachineAgent) Run(_ *cmd.Context) error {
 	err := a.runner.Wait()
 	if err == worker.ErrTerminateAgent {
 		err = a.uninstallAgent(agentConfig)
+	} else if err == worker.ErrRebootMachine {
+		// We know its a reboot error
+		logger.Infof("Caught reboot error")
+		err = a.executeRebootOrShutdown()
 	}
 	err = agentDone(err)
 	a.tomb.Kill(err)
 	return err
+}
+
+func (a *MachineAgent) executeRebootOrShutdown() error {
+	logger.Infof("Reboot: Trying to get uniter hook lock")
+	// grab hook lock
+	lock, err := getLock()
+	if err != nil {
+		return err
+	}
+	lock.Lock("preparing for reboot")
+	defer lock.Unlock()
+
+	agentCfg := a.CurrentConfig()
+	tag := a.Tag().(names.MachineTag)
+	// At this stage, all API connections would have been closed
+	// We need to reopen the API to clear the reboot flag after
+	// scheduling the reboot. It may be cleaner to do this in the reboot
+	// worker, before returning the ErrRebootMachine.
+	st, _, err := openAPIState(agentCfg, a)
+	if err != nil {
+		logger.Infof("Reboot: Error connecting to state")
+		return err
+	}
+	// block until all units/containers are ready, and reboot/shutdown
+	finalize, err := reboot.NewRebootWaiter(st, agentCfg, tag)
+	if err != nil {
+		return err
+	}
+
+	err = finalize.StopAllUnits()
+	if err != nil {
+		return err
+	}
+	// Remove the hook lock as no more units should be running that
+	// can grab that lock
+	lock.Unlock()
+
+	logger.Infof("Reboot: Executing reboot")
+	err = finalize.ExecuteReboot()
+	if err != nil {
+		logger.Infof("Reboot: Error executing reboot: %v", err)
+		return err
+	}
+	return nil
 }
 
 func (a *MachineAgent) ChangeConfig(mutate AgentConfigMutator) error {
@@ -390,6 +440,13 @@ func (a *MachineAgent) APIWorker() (worker.Worker, error) {
 	a.startWorkerAfterUpgrade(runner, "machiner", func() (worker.Worker, error) {
 		return machiner.NewMachiner(st.Machiner(), agentConfig), nil
 	})
+	a.startWorkerAfterUpgrade(runner, "reboot", func() (worker.Worker, error) {
+		reboot, err := st.Reboot()
+		if err != nil {
+			return nil, err
+		}
+		return rebootworker.NewReboot(reboot, agentConfig)
+	})
 	a.startWorkerAfterUpgrade(runner, "apiaddressupdater", func() (worker.Worker, error) {
 		return apiaddressupdater.NewAPIAddressUpdater(st.Machiner(), a), nil
 	})
@@ -475,7 +532,7 @@ func (a *MachineAgent) APIWorker() (worker.Worker, error) {
 func (a *MachineAgent) setupContainerSupport(runner worker.Runner, st *api.State, entity *apiagent.Entity, agentConfig agent.Config) error {
 	var supportedContainers []instance.ContainerType
 	// We don't yet support nested lxc containers but anything else can run an LXC container.
-	if entity.ContainerType() != instance.LXC {
+	if entity.ContainerType() != instance.LXC && runtime.GOOS != "windows" {
 		supportedContainers = append(supportedContainers, instance.LXC)
 	}
 	supportsKvm, err := kvm.IsKVMSupported()
