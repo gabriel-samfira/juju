@@ -164,7 +164,7 @@ func (manager *containerManager) IsInitialized() bool {
 			return false
 		}
 	}
-	return false
+	return true
 }
 
 func (manager *containerManager) DestroyContainer(id instance.Id) error {

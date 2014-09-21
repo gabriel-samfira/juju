@@ -2,6 +2,7 @@ package paths
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/juju/juju/version"
 )
@@ -69,6 +70,16 @@ func DataDir(series string) (string, error) {
 // a particula series
 func JujuRun(series string) (string, error) {
 	return osVal(series, jujuRun)
+}
+
+// LockDir returns the absolute path to the locks directory for
+// a particula series
+func LockDir(series string) (string, error) {
+	dataDir, err := DataDir(series)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dataDir, "locks"), nil
 }
 
 func MustSucceed(s string, e error) string {

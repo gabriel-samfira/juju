@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/juju/loggo"
-	"github.com/juju/utils/uptime"
 
 	"github.com/juju/juju/agent"
 	"github.com/juju/juju/apiserver/params"

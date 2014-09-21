@@ -274,7 +274,7 @@ func (a *MachineAgent) executeRebootOrShutdown(action params.RebootAction) error
 	}
 	// We do not defer the unlock, because we want to hold the lock until
 	// next boot. This lock will be cleared by the reboot worker at startup
-	lock.Lock("preparing for reboot")
+	lock.Lock(rebootworker.RebootMessage)
 
 	agentCfg := a.CurrentConfig()
 	// block until all units/containers are ready, and reboot/shutdown
@@ -289,7 +289,9 @@ func (a *MachineAgent) executeRebootOrShutdown(action params.RebootAction) error
 		logger.Infof("Reboot: Error executing reboot: %v", err)
 		return err
 	}
-	return nil
+	// On windows, the shutdown command is asynchronous. We return ErrRebootMachine
+	// so the agent will simply exit without error pending reboot/shutdown.
+	return worker.ErrRebootMachine
 }
 
 func (a *MachineAgent) ChangeConfig(mutate AgentConfigMutator) error {

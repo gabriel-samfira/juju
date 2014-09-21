@@ -366,7 +366,7 @@ func (manager *containerManager) IsInitialized() bool {
 			return false
 		}
 	}
-	return false
+	return true
 }
 
 const internalLogDirTemplate = "%s/%s/rootfs/var/log/juju"
