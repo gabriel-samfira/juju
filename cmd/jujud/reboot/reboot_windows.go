@@ -1,8 +1,6 @@
 package reboot
 
 import (
-	"time"
-
 	"github.com/juju/juju/apiserver/params"
 )
 
@@ -11,10 +9,9 @@ import (
 // parameters to schedule the reboot
 // If action is params.ShouldDoNothing, it will return immediately.
 // NOTE: On Windows the shutdown command is async
-func executeAction(action params.RebootAction, errChan chan error) {
+func executeAction(action params.RebootAction) error {
 	if action == params.ShouldDoNothing {
-		errChan <- nil
-		return
+		return nil
 	}
 	args := []string{"shutdown"}
 	switch action {
@@ -25,12 +22,5 @@ func executeAction(action params.RebootAction, errChan chan error) {
 	}
 	args = append(args, "-t 0")
 
-	errChan <- runCommand(args)
-}
-
-func scheduleReboot(action params.RebootAction, seconds int) <-chan error {
-	errChan := make(chan error)
-	time.Sleep(time.Duration(seconds) * time.Second)
-	go executeAction(action, errChan)
-	return errChan
+	return runCommand(args)
 }

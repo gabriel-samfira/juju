@@ -250,55 +250,41 @@ func (a *MachineAgent) Run(_ *cmd.Context) error {
 	// At this point, all workers will have been configured to start
 	close(a.workersStarted)
 	err := a.runner.Wait()
-	if err == worker.ErrTerminateAgent {
+	switch err {
+	case worker.ErrTerminateAgent:
 		err = a.uninstallAgent(agentConfig)
-	} else if err == worker.ErrRebootMachine {
-		// We know its a reboot error
+	case worker.ErrRebootMachine:
 		logger.Infof("Caught reboot error")
-		err = a.executeRebootOrShutdown()
+		err = a.executeRebootOrShutdown(params.ShouldReboot)
+	case worker.ErrShutdownMachine:
+		logger.Infof("Caught shutdown error")
+		err = a.executeRebootOrShutdown(params.ShouldShutdown)
 	}
 	err = agentDone(err)
 	a.tomb.Kill(err)
 	return err
 }
 
-func (a *MachineAgent) executeRebootOrShutdown() error {
+func (a *MachineAgent) executeRebootOrShutdown(action params.RebootAction) error {
 	logger.Infof("Reboot: Trying to get uniter hook lock")
 	// grab hook lock
 	lock, err := getLock()
 	if err != nil {
 		return err
 	}
+	// We do not defer the unlock, because we want to hold the lock until
+	// next boot. This lock will be cleared by the reboot worker at startup
 	lock.Lock("preparing for reboot")
-	defer lock.Unlock()
 
 	agentCfg := a.CurrentConfig()
-	tag := a.Tag().(names.MachineTag)
-	// At this stage, all API connections would have been closed
-	// We need to reopen the API to clear the reboot flag after
-	// scheduling the reboot. It may be cleaner to do this in the reboot
-	// worker, before returning the ErrRebootMachine.
-	st, _, err := openAPIState(agentCfg, a)
-	if err != nil {
-		logger.Infof("Reboot: Error connecting to state")
-		return err
-	}
 	// block until all units/containers are ready, and reboot/shutdown
-	finalize, err := reboot.NewRebootWaiter(st, agentCfg, tag)
+	finalize, err := reboot.NewRebootWaiter(agentCfg)
 	if err != nil {
 		return err
 	}
-
-	err = finalize.StopAllUnits()
-	if err != nil {
-		return err
-	}
-	// Remove the hook lock as no more units should be running that
-	// can grab that lock
-	lock.Unlock()
 
 	logger.Infof("Reboot: Executing reboot")
-	err = finalize.ExecuteReboot()
+	err = finalize.ExecuteReboot(action)
 	if err != nil {
 		logger.Infof("Reboot: Error executing reboot: %v", err)
 		return err
