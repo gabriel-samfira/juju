@@ -35,10 +35,10 @@ func (c *JujuRebootCommand) Init(args []string) error {
 func (c *JujuRebootCommand) Run(ctx *cmd.Context) error {
 	logger.Debugf("Running juju-reboot for: %v", c.ctx.UnitName())
 
-	rebootPrio := RebootAfterHook
+	rebootPriority := RebootAfterHook
 	if c.Now {
-		rebootPrio = RebootNow
+		rebootPriority = RebootNow
 	}
 
-	return c.ctx.RequestReboot(rebootPrio)
+	return c.ctx.RequestReboot(rebootPriority)
 }
