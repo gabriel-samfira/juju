@@ -14,6 +14,7 @@ import (
 	"github.com/juju/utils/fslock"
 	"launchpad.net/gnuflag"
 
+	"github.com/juju/juju/juju/paths"
 	"github.com/juju/juju/juju/sockets"
 	"github.com/juju/juju/version"
 	"github.com/juju/juju/worker/uniter"
@@ -21,7 +22,7 @@ import (
 
 var (
 	AgentDir = filepath.Join(dataDir, "agents")
-	LockDir  = filepath.Join(dataDir, "locks")
+	LockDir  = paths.MustSucceed(paths.LockDir(version.Current.Series))
 )
 
 type RunCommand struct {
