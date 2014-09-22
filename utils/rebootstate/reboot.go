@@ -23,7 +23,7 @@ func New() error {
 	}
 	uptime, err := UptimeFunc()
 	if err != nil {
-		return errors.Trace(err)
+		return err
 	}
 
 	contents := []byte(strconv.FormatInt(uptime, 10))
@@ -45,11 +45,11 @@ func Remove() error {
 func Read() (int64, error) {
 	contents, err := ioutil.ReadFile(RebootStateFile)
 	if err != nil {
-		return 0, errors.Trace(err)
+		return 0, err
 	}
 	uptime, err := strconv.ParseInt(string(contents), 10, 64)
 	if err != nil {
-		return 0, errors.Trace(err)
+		return 0, err
 	}
 	return uptime, nil
 }
