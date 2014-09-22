@@ -92,6 +92,7 @@ func (r *Reboot) waitForContainersOrTimeout() error {
 					c <- nil
 					return
 				}
+				logger.Warningf("Waiting for containers to shutdown: %v", containers)
 				time.Sleep(1 * time.Second)
 			}
 		}
