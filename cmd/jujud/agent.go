@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -123,8 +124,12 @@ func importance(err error) int {
 		return 1
 	case isUpgraded(err):
 		return 2
-	case err == worker.ErrTerminateAgent:
+	case err == worker.ErrRebootMachine:
 		return 3
+	case err == worker.ErrShutdownMachine:
+		return 3
+	case err == worker.ErrTerminateAgent:
+		return 4
 	}
 }
 
@@ -165,6 +170,9 @@ func (e *fatalError) Error() string {
 
 func isFatal(err error) bool {
 	if err == worker.ErrTerminateAgent {
+		return true
+	}
+	if err == worker.ErrRebootMachine || err == worker.ErrShutdownMachine {
 		return true
 	}
 	if isUpgraded(err) {
@@ -315,6 +323,9 @@ func openAPIState(agentConfig agent.Config, a Agent) (_ *api.State, _ *apiagent.
 func agentDone(err error) error {
 	if err == worker.ErrTerminateAgent {
 		err = nil
+	} else if err == worker.ErrRebootMachine || err == worker.ErrShutdownMachine {
+		// Machine needs to be rebooted. We are exiting
+		os.Exit(0)
 	}
 	if ug, ok := err.(*upgrader.UpgradeReadyError); ok {
 		if err := ug.ChangeAgentTools(); err != nil {

@@ -34,6 +34,10 @@ type Manager interface {
 	// ListContainers return a list of containers that have been started by
 	// this manager.
 	ListContainers() ([]instance.Instance, error)
+
+	// IsInitialized check whether or not required packages have been installed
+	// to support this manager.
+	IsInitialized() bool
 }
 
 // Initialiser is responsible for performing the steps required to initialise
