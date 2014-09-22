@@ -19,7 +19,6 @@ import (
 )
 
 var ErrTerminateAgent = errors.New("agent should be terminated")
-var ErrRebootMachine = errors.New("machine needs to reboot")
 
 var loadedInvalid = func() {}
 
