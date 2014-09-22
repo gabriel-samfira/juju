@@ -488,6 +488,34 @@ func (u *Uniter) validateAction(name string, params map[string]interface{}) (boo
 	return spec.ValidateParams(params)
 }
 
+func (u *Uniter) handleReboot(context *HookContext, hi *hook.Info, err *error) {
+	sendReboot := false
+	switch context.rebootPriority {
+	case jujuc.RebootNow:
+		if stErr := u.writeState(RunHook, Queued, hi, nil); stErr != nil {
+			*err = stErr
+			return
+		}
+		sendReboot = true
+	case jujuc.RebootAfterHook:
+		// Do not reboot if the hook errored out before finishing.
+		// RebootAfterHook is meant to execute after a successful hook run
+		if *err == nil {
+			sendReboot = true
+		}
+	}
+
+	if sendReboot {
+		// set the reboot flag on the machine agent
+		errR := context.unit.RequestReboot()
+		if errR != nil {
+			*err = errR
+			return
+		}
+		*err = worker.ErrRebootMachine
+	}
+}
+
 // runHook executes the supplied hook.Info in an appropriate hook context. If
 // the hook itself fails to execute, it returns errHookFailed.
 func (u *Uniter) runHook(hi hook.Info) (err error) {
@@ -561,14 +589,20 @@ func (u *Uniter) runHook(hi hook.Info) (err error) {
 		err = hctx.RunHook(hookName, u.charmPath, u.toolsDir, socketPath)
 	}
 
+	defer u.handleReboot(hctx, &hi, &err)
 	// Since the Action validation error was separated, regular error pathways
 	// will still occur correctly.
 	if IsMissingHookError(err) {
 		ranHook = false
 	} else if err != nil {
-		logger.Errorf("hook failed: %s", err)
-		u.notifyHookFailed(hookName, hctx)
-		return errHookFailed
+		switch hctx.rebootPriority {
+		case jujuc.RebootSkip:
+			logger.Errorf("hook failed: %s", err)
+			u.notifyHookFailed(hookName, hctx)
+			return errHookFailed
+		case jujuc.RebootNow:
+			return worker.ErrRebootMachine
+		}
 	}
 	if err := u.writeState(RunHook, Done, &hi, nil); err != nil {
 		return err
@@ -579,7 +613,13 @@ func (u *Uniter) runHook(hi hook.Info) (err error) {
 	} else {
 		logger.Infof("skipped %q hook (missing)", hookName)
 	}
-	return u.commitHook(hi)
+
+	err = u.commitHook(hi)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // commitHook ensures that state is consistent with the supplied hook, and

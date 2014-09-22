@@ -138,6 +138,10 @@ func (c *Context) HookRelation() (jujuc.ContextRelation, bool) {
 	return c.Relation(c.relid)
 }
 
+func (c *Context) RequestReboot(jujuc.RebootPriority) error {
+	return nil
+}
+
 func (c *Context) RemoteUnitName() (string, bool) {
 	return c.remote, c.remote != ""
 }
