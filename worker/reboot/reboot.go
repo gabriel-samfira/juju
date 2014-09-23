@@ -7,7 +7,6 @@ import (
 	"github.com/juju/loggo"
 	"github.com/juju/names"
 	"github.com/juju/utils/fslock"
-	"github.com/juju/utils/uptime"
 	"launchpad.net/tomb"
 
 	"github.com/juju/juju/agent"
