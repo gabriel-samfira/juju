@@ -4,30 +4,19 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	"github.com/juju/errors"
-	"github.com/juju/utils/uptime"
 
 	"github.com/juju/juju/agent"
 )
 
 var RebootStateFile = filepath.Join(agent.DefaultDataDir, "reboot-state.txt")
 
-// for testing
-var UptimeFunc = uptime.Uptime
-
 func New() error {
-	if _, err := os.Stat(RebootStateFile); err == nil {
+	if IsPresent() {
 		return errors.Errorf("state file %s already exists", RebootStateFile)
 	}
-	uptime, err := UptimeFunc()
-	if err != nil {
-		return err
-	}
-
-	contents := []byte(strconv.FormatInt(uptime, 10))
-	err = ioutil.WriteFile(RebootStateFile, contents, 400)
+	err := ioutil.WriteFile(RebootStateFile, []byte(""), 400)
 	if err != nil {
 		return err
 	}
@@ -42,14 +31,9 @@ func Remove() error {
 	return nil
 }
 
-func Read() (int64, error) {
-	contents, err := ioutil.ReadFile(RebootStateFile)
-	if err != nil {
-		return 0, err
+func IsPresent() bool {
+	if _, err := os.Stat(RebootStateFile); err != nil {
+		return false
 	}
-	uptime, err := strconv.ParseInt(string(contents), 10, 64)
-	if err != nil {
-		return 0, err
-	}
-	return uptime, nil
+	return true
 }

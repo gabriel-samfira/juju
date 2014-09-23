@@ -1,7 +1,6 @@
 package rebootstate_test
 
 import (
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,42 +28,34 @@ func (s *rebootstateSuite) SetUpTest(c *gc.C) {
 	s.IsolationSuite.SetUpTest(c)
 }
 
+func (s *rebootstateSuite) fileExists(f string) bool {
+	if _, err := os.Stat(f); err != nil {
+		return false
+	}
+	return true
+}
+
 func (s *rebootstateSuite) TestNewState(c *gc.C) {
-	s.PatchValue(&rebootstate.UptimeFunc, func() (int64, error) { return int64(2), nil })
 	err := rebootstate.New()
 	c.Assert(err, gc.IsNil)
-	contents, err := ioutil.ReadFile(rebootstate.RebootStateFile)
-	c.Assert(err, gc.IsNil)
-	c.Assert(string(contents), gc.Equals, "2")
+	c.Assert(s.fileExists(rebootstate.RebootStateFile), jc.IsTrue)
 }
 
 func (s *rebootstateSuite) TestMultipleNewState(c *gc.C) {
-	s.PatchValue(&rebootstate.UptimeFunc, func() (int64, error) { return int64(2), nil })
 	err := rebootstate.New()
 	c.Assert(err, gc.IsNil)
 	err = rebootstate.New()
 	c.Assert(err, gc.ErrorMatches, "state file (.*) already exists")
 }
 
-func (s *rebootstateSuite) TestReadState(c *gc.C) {
-	s.PatchValue(&rebootstate.UptimeFunc, func() (int64, error) { return int64(2), nil })
-	expectUtime, _ := rebootstate.UptimeFunc()
+func (s *rebootstateSuite) TestIsPresent(c *gc.C) {
 	err := rebootstate.New()
 	c.Assert(err, gc.IsNil)
-	uptime, err := rebootstate.Read()
-	c.Assert(err, gc.IsNil)
-	c.Assert(uptime, gc.Equals, expectUtime)
-}
-
-func (s *rebootstateSuite) fileExists(path string) bool {
-	if _, err := os.Stat(path); err != nil {
-		return false
-	}
-	return true
+	exists := rebootstate.IsPresent()
+	c.Assert(exists, jc.IsTrue)
 }
 
 func (s *rebootstateSuite) TestRemoveState(c *gc.C) {
-	s.PatchValue(&rebootstate.UptimeFunc, func() (int64, error) { return int64(2), nil })
 	err := rebootstate.New()
 	c.Assert(err, gc.IsNil)
 	err = rebootstate.Remove()

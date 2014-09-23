@@ -1,8 +1,6 @@
 package reboot
 
 import (
-	"os"
-
 	"github.com/juju/errors"
 	"github.com/juju/loggo"
 	"github.com/juju/names"
@@ -65,13 +63,8 @@ func (r *Reboot) breakHookLock() error {
 }
 
 func (r *Reboot) checkForRebootState() error {
-	_, err := rebootstate.Read()
-	if err != nil {
-		if _, ok := err.(*os.PathError); ok {
-			// No RebootStateFile was found.
-			return nil
-		}
-		return err
+	if !rebootstate.IsPresent() {
+		return nil
 	}
 
 	// Check if reboot flag is set.
