@@ -25,9 +25,10 @@ const RebootMessage = "preparing for reboot"
 var _ worker.NotifyWatchHandler = (*Reboot)(nil)
 
 // The reboot worker listens for changes to the reboot flag and
-// exists with worker.ErrRebootMachine if the machine should shutdown
-// or reboot. This will be picked up by the machine agent as a fatal error
-// and will do the right thing (reboot or shutdown)
+// exists with worker.ErrRebootMachine if the machine should reboot or
+// with worker.ErrShutdownMachine if it should shutdoen. This will be picked
+// up by the machine agent as a fatal error and will do the
+// right thing (reboot or shutdown)
 type Reboot struct {
 	tomb tomb.Tomb
 	st   *reboot.State
