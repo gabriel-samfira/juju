@@ -448,7 +448,7 @@ func (a *MachineAgent) APIWorker() (worker.Worker, error) {
 		return newRsyslogConfigWorker(st.Rsyslog(), agentConfig, rsyslogMode)
 	})
 	// TODO (mfoord 8/8/2014) improve the way we detect networking capabilities. Bug lp:1354365
-	writeNetworkConfig := providerType == "maas"
+	writeNetworkConfig := providerType == "maas" && version.Current.OS != version.Windows
 	if disableNetworkManagement || !writeNetworkConfig {
 		a.startWorkerAfterUpgrade(runner, "networker", func() (worker.Worker, error) {
 			return newSafeNetworker(st.Networker(), agentConfig, networker.DefaultConfigDir)
