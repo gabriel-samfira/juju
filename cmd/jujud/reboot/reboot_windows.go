@@ -13,14 +13,14 @@ func executeAction(action params.RebootAction) error {
 	if action == params.ShouldDoNothing {
 		return nil
 	}
-	args := []string{"shutdown"}
+	args := []string{"shutdown.exe"}
 	switch action {
 	case params.ShouldReboot:
 		args = append(args, "-r")
 	case params.ShouldShutdown:
 		args = append(args, "-s")
 	}
-	args = append(args, "-t 0")
+	args = append(args, "-t", "0")
 
 	return runCommand(args)
 }

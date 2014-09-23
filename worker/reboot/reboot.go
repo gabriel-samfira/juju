@@ -7,7 +7,7 @@ import (
 	"github.com/juju/loggo"
 	"github.com/juju/names"
 	"github.com/juju/utils/fslock"
-	"github.com/juju/utils/uptime"
+	// "github.com/juju/utils/uptime"
 	"launchpad.net/tomb"
 
 	"github.com/juju/juju/agent"
@@ -66,7 +66,7 @@ func (r *Reboot) breakHookLock() error {
 }
 
 func (r *Reboot) checkForRebootState() error {
-	utime, err := rebootstate.Read()
+	_, err := rebootstate.Read()
 	if err != nil {
 		if _, ok := err.(*os.PathError); ok {
 			// No RebootStateFile was found.
@@ -75,27 +75,27 @@ func (r *Reboot) checkForRebootState() error {
 		return err
 	}
 
-	currentUptime, err := uptime.Uptime()
-	if err != nil {
-		return err
-	}
-	if utime < currentUptime {
-		// Uptime in the state file is lower then current uptime.
-		// This is normal if we set the file, but have not yet managed to do a reboot
-		// At this point however, the reboot flag in the state machine
-		// should be set if we still have to reboot.
-		rAction, err := r.st.GetRebootAction()
-		if err != nil {
-			return err
-		}
-		if rAction == params.ShouldDoNothing {
-			logger.Infof("Clearing stale reboot state file")
-			err = rebootstate.Remove()
-			return err
-		}
-		// We still have to reboot.
-		return nil
-	}
+	// currentUptime, err := uptime.Uptime()
+	// if err != nil {
+	// 	return err
+	// }
+	// if utime < currentUptime {
+	// 	// Uptime in the state file is lower then current uptime.
+	// 	// This is normal if we set the file, but have not yet managed to do a reboot
+	// 	// At this point however, the reboot flag in the state machine
+	// 	// should be set if we still have to reboot.
+	// 	rAction, err := r.st.GetRebootAction()
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	if rAction == params.ShouldDoNothing {
+	// 		logger.Infof("Clearing stale reboot state file")
+	// 		err = rebootstate.Remove()
+	// 		return err
+	// 	}
+	// 	// We still have to reboot.
+	// 	return nil
+	// }
 
 	// Clear reboot flag
 	err = r.st.ClearReboot()
