@@ -84,7 +84,7 @@ func GetOSFromSeries(series string) (OSType, error) {
 			return Windows, nil
 		}
 	}
-	for _, val := range macOSXSeries{
+	for _, val := range macOSXSeries {
 		if val == series {
 			return OSX, nil
 		}
