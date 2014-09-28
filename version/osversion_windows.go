@@ -21,7 +21,7 @@ func readRegString(h syscall.Handle, key string) (value string, err error) {
 		return value, err
 	}
 
-	n := make([]uint16, buf/2+1)
+	n := make([]uint16, 128)
 	err = syscall.RegQueryValueEx(h, syscall.StringToUTF16Ptr(key), nil, &typ, (*byte)(unsafe.Pointer(&n[0])), &buf)
 	if err != nil {
 		return value, err
