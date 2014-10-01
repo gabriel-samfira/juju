@@ -29,7 +29,11 @@ func (c *JujuRebootCommand) SetFlags(f *gnuflag.FlagSet) {
 }
 
 func (c *JujuRebootCommand) Init(args []string) error {
-	return cmd.CheckEmpty(args)
+	if len(args) == 0 {
+		return nil
+	} else {
+		return cmd.CheckEmpty(args)
+	}
 }
 
 func (c *JujuRebootCommand) Run(ctx *cmd.Context) error {
