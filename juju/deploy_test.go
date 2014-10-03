@@ -10,9 +10,9 @@ import (
 	"github.com/juju/errors"
 	jc "github.com/juju/testing/checkers"
 	"github.com/juju/utils/set"
-	"gopkg.in/juju/charm.v3"
-	charmtesting "gopkg.in/juju/charm.v3/testing"
-	gc "launchpad.net/gocheck"
+	gc "gopkg.in/check.v1"
+	"gopkg.in/juju/charm.v4"
+	charmtesting "gopkg.in/juju/charm.v4/testing"
 
 	"github.com/juju/juju/constraints"
 	"github.com/juju/juju/instance"
@@ -69,7 +69,7 @@ func (s *DeployLocalSuite) TestDeployMinimal(c *gc.C) {
 	s.assertSettings(c, service, charm.Settings{})
 	s.assertConstraints(c, service, constraints.Value{})
 	s.assertMachines(c, service, constraints.Value{})
-	c.Assert(service.GetOwnerTag(), gc.Equals, "user-admin")
+	c.Assert(service.GetOwnerTag(), gc.Equals, s.AdminUserTag(c).String())
 }
 
 func (s *DeployLocalSuite) TestDeployOwnerTag(c *gc.C) {

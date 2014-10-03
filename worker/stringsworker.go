@@ -6,7 +6,7 @@ package worker
 import (
 	"launchpad.net/tomb"
 
-	apiWatcher "github.com/juju/juju/state/api/watcher"
+	apiWatcher "github.com/juju/juju/api/watcher"
 	"github.com/juju/juju/state/watcher"
 )
 
@@ -78,7 +78,7 @@ func (sw *stringsWorker) loop() error {
 			return tomb.ErrDying
 		case changes, ok := <-w.Changes():
 			if !ok {
-				return mustErr(w)
+				return ensureErr(w)
 			}
 			if err := sw.handler.Handle(changes); err != nil {
 				return err

@@ -5,11 +5,10 @@ package main
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	jc "github.com/juju/testing/checkers"
-	gc "launchpad.net/gocheck"
+	gc "gopkg.in/check.v1"
 
 	"github.com/juju/juju/cmd/envcmd"
 	"github.com/juju/juju/environs/config"
@@ -38,7 +37,7 @@ var singleValueTests = []struct {
 		output: "dummyenv",
 	}, {
 		key:    "authorized-keys",
-		output: regexp.QuoteMeta(dummy.SampleConfig()["authorized-keys"].(string)) + "\n.*juju-system-key",
+		output: dummy.SampleConfig()["authorized-keys"].(string),
 	}, {
 		key: "unknown",
 		err: `Key "unknown" not found in "dummyenv" environment.`,
@@ -53,7 +52,7 @@ func (s *GetEnvironmentSuite) TestSingleValue(c *gc.C) {
 		} else {
 			output := strings.TrimSpace(testing.Stdout(context))
 			c.Assert(err, gc.IsNil)
-			c.Assert(output, gc.Matches, t.output)
+			c.Assert(output, gc.Equals, t.output)
 		}
 	}
 }
@@ -131,7 +130,7 @@ func (s *SetEnvironmentSuite) TestChangeDefaultSeries(c *gc.C) {
 	c.Assert(err, gc.IsNil)
 	series, ok := stateConfig.DefaultSeries()
 	c.Assert(ok, gc.Equals, true)
-	c.Assert(series, gc.Equals, "precise") // default-series set in RepoSuite.SetUpTest
+	c.Assert(series, gc.Equals, config.LatestLtsSeries()) // default-series set in RepoSuite.SetUpTest
 
 	_, err = testing.RunCommand(c, envcmd.Wrap(&SetEnvironmentCommand{}), "default-series=raring")
 	c.Assert(err, gc.IsNil)

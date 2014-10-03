@@ -17,7 +17,6 @@ import (
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/network"
 	"github.com/juju/juju/replicaset"
-	"github.com/juju/juju/state/api/params"
 )
 
 // MachineTemplate holds attributes that are to be associated
@@ -246,11 +245,10 @@ func (st *State) addMachineOps(template MachineTemplate) (*machineDoc, []txn.Op,
 		return nil, nil, err
 	}
 	mdoc := machineDocForTemplate(template, strconv.Itoa(seq))
-	var ops []txn.Op
-	ops = append(ops, st.insertNewMachineOps(mdoc, template)...)
-	ops = append(ops, st.insertNewContainerRefOp(mdoc.Id))
+	prereqOps, machineOp := st.insertNewMachineOps(mdoc, template)
+	prereqOps = append(prereqOps, st.insertNewContainerRefOp(mdoc.Id))
 	if template.InstanceId != "" {
-		ops = append(ops, txn.Op{
+		prereqOps = append(prereqOps, txn.Op{
 			C:      instanceDataC,
 			Id:     mdoc.Id,
 			Assert: txn.DocMissing,
@@ -266,7 +264,7 @@ func (st *State) addMachineOps(template MachineTemplate) (*machineDoc, []txn.Op,
 			},
 		})
 	}
-	return mdoc, ops, nil
+	return mdoc, append(prereqOps, machineOp), nil
 }
 
 // supportsContainerType reports whether the machine supports the given
@@ -321,15 +319,14 @@ func (st *State) addMachineInsideMachineOps(template MachineTemplate, parentId s
 	}
 	mdoc := machineDocForTemplate(template, newId)
 	mdoc.ContainerType = string(containerType)
-	var ops []txn.Op
-	ops = append(ops, st.insertNewMachineOps(mdoc, template)...)
-	ops = append(ops,
+	prereqOps, machineOp := st.insertNewMachineOps(mdoc, template)
+	prereqOps = append(prereqOps,
 		// Update containers record for host machine.
 		st.addChildToContainerRefOp(parentId, mdoc.Id),
 		// Create a containers reference document for the container itself.
 		st.insertNewContainerRefOp(mdoc.Id),
 	)
-	return mdoc, ops, nil
+	return mdoc, append(prereqOps, machineOp), nil
 }
 
 // newContainerId returns a new id for a machine within the machine
@@ -382,16 +379,16 @@ func (st *State) addMachineInsideNewMachineOps(template, parentTemplate MachineT
 	}
 	mdoc := machineDocForTemplate(template, newId)
 	mdoc.ContainerType = string(containerType)
-	var ops []txn.Op
-	ops = append(ops, st.insertNewMachineOps(parentDoc, parentTemplate)...)
-	ops = append(ops, st.insertNewMachineOps(mdoc, template)...)
-	ops = append(ops,
+	parentPrereqOps, parentOp := st.insertNewMachineOps(parentDoc, parentTemplate)
+	prereqOps, machineOp := st.insertNewMachineOps(mdoc, template)
+	prereqOps = append(prereqOps, parentPrereqOps...)
+	prereqOps = append(prereqOps,
 		// The host machine doesn't exist yet, create a new containers record.
 		st.insertNewContainerRefOp(mdoc.Id),
 		// Create a containers reference document for the container itself.
 		st.insertNewContainerRefOp(parentDoc.Id, mdoc.Id),
 	)
-	return mdoc, ops, nil
+	return mdoc, append(prereqOps, parentOp, machineOp), nil
 }
 
 func machineDocForTemplate(template MachineTemplate, id string) *machineDoc {
@@ -413,24 +410,25 @@ func machineDocForTemplate(template MachineTemplate, id string) *machineDoc {
 // insertNewMachineOps returns operations to insert the given machine
 // document into the database, based on the given template. Only the
 // constraints and networks are used from the template.
-func (st *State) insertNewMachineOps(mdoc *machineDoc, template MachineTemplate) []txn.Op {
+func (st *State) insertNewMachineOps(mdoc *machineDoc, template MachineTemplate) (prereqOps []txn.Op, machineOp txn.Op) {
+	machineOp = txn.Op{
+		C:      machinesC,
+		Id:     mdoc.Id,
+		Assert: txn.DocMissing,
+		Insert: mdoc,
+	}
+
 	return []txn.Op{
-		{
-			C:      machinesC,
-			Id:     mdoc.Id,
-			Assert: txn.DocMissing,
-			Insert: mdoc,
-		},
 		createConstraintsOp(st, machineGlobalKey(mdoc.Id), template.Constraints),
 		createStatusOp(st, machineGlobalKey(mdoc.Id), statusDoc{
-			Status: params.StatusPending,
+			Status: StatusPending,
 		}),
 		// TODO(dimitern) 2014-04-04 bug #1302498
 		// Once we can add networks independently of machine
 		// provisioning, we should check the given networks are valid
 		// and known before setting them.
 		createRequestedNetworksOp(st, machineGlobalKey(mdoc.Id), template.RequestedNetworks),
-	}
+	}, machineOp
 }
 
 func hasJob(jobs []MachineJob, job MachineJob) bool {
@@ -497,7 +495,13 @@ func (st *State) maintainStateServersOps(mdocs []*machineDoc, currentInfo *State
 // EnsureAvailability adds state server machines as necessary to make
 // the number of live state servers equal to numStateServers. The given
 // constraints and series will be attached to any new machines.
-func (st *State) EnsureAvailability(numStateServers int, cons constraints.Value, series string) (StateServersChanges, error) {
+// If placement is not empty, any new machines which may be required are started
+// according to the specified placement directives until the placement list is
+// exhausted; thereafter any new machines are started according to the constraints and series.
+func (st *State) EnsureAvailability(
+	numStateServers int, cons constraints.Value, series string, placement []string,
+) (StateServersChanges, error) {
+
 	if numStateServers < 0 || (numStateServers != 0 && numStateServers%2 != 1) {
 		return StateServersChanges{}, fmt.Errorf("number of state servers must be odd and non-negative")
 	}
@@ -543,7 +547,7 @@ func (st *State) EnsureAvailability(numStateServers int, cons constraints.Value,
 		logger.Infof("%d new machines; promoting %v", intent.newCount, intent.promote)
 
 		var ops []txn.Op
-		ops, change, err = st.ensureAvailabilityIntentionOps(intent, currentInfo, cons, series)
+		ops, change, err = st.ensureAvailabilityIntentionOps(intent, currentInfo, cons, series, placement)
 		return ops, err
 	}
 	if err := st.run(buildTxn); err != nil {
@@ -568,6 +572,7 @@ func (st *State) ensureAvailabilityIntentionOps(
 	currentInfo *StateServerInfo,
 	cons constraints.Value,
 	series string,
+	placement []string,
 ) ([]txn.Op, StateServersChanges, error) {
 	var ops []txn.Op
 	var change StateServersChanges
@@ -579,6 +584,19 @@ func (st *State) ensureAvailabilityIntentionOps(
 		ops = append(ops, demoteStateServerOps(m)...)
 		change.Demoted = append(change.Demoted, m.doc.Id)
 	}
+	// Use any placement directives that have been provided
+	// when adding new machines, until the directives have
+	// been all used up. Set up a helper function to do the
+	// work required.
+	placementCount := 0
+	getPlacement := func() string {
+		if placementCount >= len(placement) {
+			return ""
+		}
+		result := placement[placementCount]
+		placementCount++
+		return result
+	}
 	mdocs := make([]*machineDoc, intent.newCount)
 	for i := range mdocs {
 		template := MachineTemplate{
@@ -588,6 +606,7 @@ func (st *State) ensureAvailabilityIntentionOps(
 				JobManageEnviron,
 			},
 			Constraints: cons,
+			Placement:   getPlacement(),
 		}
 		mdoc, addOps, err := st.addMachineOps(template)
 		if err != nil {

@@ -4,21 +4,17 @@
 package manual
 
 import (
-	"strings"
-
 	"github.com/juju/errors"
 	"github.com/juju/testing"
 	jc "github.com/juju/testing/checkers"
-	gc "launchpad.net/gocheck"
+	gc "gopkg.in/check.v1"
 
 	"github.com/juju/juju/constraints"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/storage"
-	"github.com/juju/juju/environs/tools"
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/juju/arch"
 	coretesting "github.com/juju/juju/testing"
-	coretools "github.com/juju/juju/tools"
 	"github.com/juju/juju/version"
 )
 
@@ -134,15 +130,6 @@ func (s *environSuite) TestLocalStorageConfig(c *gc.C) {
 	c.Assert(s.env.SharedStorageDir(), gc.Equals, "")
 }
 
-func (s *environSuite) TestEnvironSupportsCustomSources(c *gc.C) {
-	sources, err := tools.GetMetadataSources(s.env)
-	c.Assert(err, gc.IsNil)
-	c.Assert(len(sources), gc.Equals, 2)
-	url, err := sources[0].URL("")
-	c.Assert(err, gc.IsNil)
-	c.Assert(strings.Contains(url, "/tools"), jc.IsTrue)
-}
-
 func (s *environSuite) TestSupportedArchitectures(c *gc.C) {
 	arches, err := s.env.SupportedArchitectures()
 	c.Assert(err, gc.IsNil)
@@ -193,9 +180,6 @@ func (s *bootstrapSuite) TestBootstrapClearsUseSSHStorage(c *gc.C) {
 	})
 	s.PatchValue(&manualCheckProvisioned, func(string) (bool, error) {
 		return false, nil
-	})
-	s.PatchValue(&commonEnsureBootstrapTools, func(environs.BootstrapContext, environs.Environ, string, *string) (coretools.List, error) {
-		return nil, nil
 	})
 
 	// use-sshstorage is initially true.

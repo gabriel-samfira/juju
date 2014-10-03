@@ -8,7 +8,6 @@ import (
 
 	"github.com/juju/juju/environs/config"
 	"github.com/juju/juju/instance"
-	"github.com/juju/juju/state/api/params"
 	"github.com/juju/juju/tools"
 	"github.com/juju/juju/version"
 )
@@ -16,7 +15,7 @@ import (
 // EntityFinder is implemented by *State. See State.FindEntity
 // for documentation on the method.
 type EntityFinder interface {
-	FindEntity(tag string) (Entity, error)
+	FindEntity(tag names.Tag) (Entity, error)
 }
 
 var _ EntityFinder = (*State)(nil)
@@ -35,21 +34,6 @@ var (
 	_ Entity = (*User)(nil)
 	_ Entity = (*Action)(nil)
 	_ Entity = (*ActionResult)(nil)
-)
-
-type StatusSetter interface {
-	SetStatus(status params.Status, info string, data params.StatusData) error
-}
-
-type StatusGetter interface {
-	Status() (status params.Status, info string, data params.StatusData, err error)
-}
-
-var (
-	_ StatusSetter = (*Machine)(nil)
-	_ StatusSetter = (*Unit)(nil)
-	_ StatusGetter = (*Machine)(nil)
-	_ StatusGetter = (*Unit)(nil)
 )
 
 // Lifer represents an entity with a life.

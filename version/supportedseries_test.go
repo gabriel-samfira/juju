@@ -4,7 +4,8 @@
 package version_test
 
 import (
-	gc "launchpad.net/gocheck"
+	jc "github.com/juju/testing/checkers"
+	gc "gopkg.in/check.v1"
 
 	"github.com/juju/juju/testing"
 	"github.com/juju/juju/version"
@@ -51,4 +52,17 @@ func (s *supportedSeriesSuite) TestGetOSFromSeries(c *gc.C) {
 			c.Assert(got, gc.Equals, t.want)
 		}
 	}
+}
+
+func (s *supportedSeriesSuite) TestOSSupportedSeries(c *gc.C) {
+	version.SetSeriesVersions(map[string]string{
+		"trusty": "14.04",
+		"utopic": "14.10",
+		"win7":   "win7",
+		"win81":  "win81",
+	})
+	series := version.OSSupportedSeries(version.Ubuntu)
+	c.Assert(series, jc.SameContents, []string{"trusty", "utopic"})
+	series = version.OSSupportedSeries(version.Windows)
+	c.Assert(series, jc.SameContents, []string{"win7", "win81"})
 }

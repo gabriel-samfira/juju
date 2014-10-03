@@ -5,14 +5,18 @@ package multiwatcher
 
 import (
 	"container/list"
-	"errors"
+	stderrors "errors"
 	"reflect"
 
+	"github.com/juju/errors"
+	"github.com/juju/loggo"
 	"launchpad.net/tomb"
 
-	"github.com/juju/juju/state/api/params"
+	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/state/watcher"
 )
+
+var logger = loggo.GetLogger("juju.state.multiwatcher")
 
 // Watcher watches any changes to the state.
 type Watcher struct {
@@ -39,10 +43,10 @@ func (w *Watcher) Stop() error {
 		return nil
 	case <-w.all.tomb.Dead():
 	}
-	return w.all.tomb.Err()
+	return errors.Trace(w.all.tomb.Err())
 }
 
-var ErrWatcherStopped = errors.New("watcher was stopped")
+var ErrWatcherStopped = stderrors.New("watcher was stopped")
 
 // Next retrieves all changes that have happened since the last
 // time it was called, blocking until there are some changes available.
@@ -56,12 +60,12 @@ func (w *Watcher) Next() ([]params.Delta, error) {
 	case <-w.all.tomb.Dead():
 		err := w.all.tomb.Err()
 		if err == nil {
-			err = errors.New("shared state watcher was stopped")
+			err = errors.Errorf("shared state watcher was stopped")
 		}
 		return nil, err
 	}
 	if ok := <-req.reply; !ok {
-		return nil, ErrWatcherStopped
+		return nil, errors.Trace(ErrWatcherStopped)
 	}
 	return req.changes, nil
 }
@@ -85,9 +89,6 @@ type StoreManager struct {
 	// outstanding for the associated Watcher.
 	waiting map[*Watcher]*request
 }
-
-// InfoId holds an identifier for an Info item held in a Store.
-type InfoId interface{}
 
 // Backing is the interface required by the StoreManager to access the
 // underlying state.
@@ -156,7 +157,16 @@ func NewStoreManager(backing Backing) *StoreManager {
 		// forever. This currently fits the way we go about things,
 		// because we reconnect to the state on any error, but
 		// perhaps there are errors we could recover from.
-		sm.tomb.Kill(sm.loop())
+
+		err := sm.loop()
+		cause := errors.Cause(err)
+		// tomb expects ErrDying or ErrStillAlive as
+		// exact values, so we need to log and unwrap
+		// the error first.
+		if err != nil && cause != tomb.ErrDying {
+			errors.LoggedErrorf(logger, "store manager loop failed: %v", err)
+		}
+		sm.tomb.Kill(cause)
 	}()
 	return sm
 }
@@ -177,10 +187,10 @@ func (sm *StoreManager) loop() error {
 	for {
 		select {
 		case <-sm.tomb.Dying():
-			return tomb.ErrDying
+			return errors.Trace(tomb.ErrDying)
 		case change := <-in:
 			if err := sm.backing.Changed(sm.all, change); err != nil {
-				return err
+				return errors.Trace(err)
 			}
 		case req := <-sm.request:
 			sm.handle(req)
@@ -192,7 +202,7 @@ func (sm *StoreManager) loop() error {
 // Stop stops the StoreManager.
 func (sm *StoreManager) Stop() error {
 	sm.tomb.Kill(nil)
-	return sm.tomb.Wait()
+	return errors.Trace(sm.tomb.Wait())
 }
 
 // handle processes a request from a Watcher to the StoreManager.
@@ -314,14 +324,21 @@ type entityEntry struct {
 	refCount int
 
 	// info holds the actual information on the entity.
-	info params.EntityInfo
+	info EntityInfo
+}
+
+// EntityInfo is implemented by all entity Info types.
+type EntityInfo interface {
+	// EntityId returns an identifier that will uniquely
+	// identify the entity within its kind
+	EntityId() params.EntityId
 }
 
 // Store holds a list of all entities known
 // to a Watcher.
 type Store struct {
 	latestRevno int64
-	entities    map[InfoId]*list.Element
+	entities    map[interface{}]*list.Element
 	list        *list.List
 }
 
@@ -330,7 +347,7 @@ type Store struct {
 // It is only exposed here for testing purposes.
 func NewStore() *Store {
 	all := &Store{
-		entities: make(map[InfoId]*list.Element),
+		entities: make(map[interface{}]*list.Element),
 		list:     list.New(),
 	}
 	return all
@@ -338,8 +355,8 @@ func NewStore() *Store {
 
 // All returns all the entities stored in the Store,
 // oldest first. It is only exposed for testing purposes.
-func (a *Store) All() []params.EntityInfo {
-	entities := make([]params.EntityInfo, 0, a.list.Len())
+func (a *Store) All() []EntityInfo {
+	entities := make([]EntityInfo, 0, a.list.Len())
 	for e := a.list.Front(); e != nil; e = e.Next() {
 		entry := e.Value.(*entityEntry)
 		if entry.removed {
@@ -352,7 +369,7 @@ func (a *Store) All() []params.EntityInfo {
 
 // add adds a new entity with the given id and associated
 // information to the list.
-func (a *Store) add(id InfoId, info params.EntityInfo) {
+func (a *Store) add(id interface{}, info EntityInfo) {
 	if a.entities[id] != nil {
 		panic("adding new entry with duplicate id")
 	}
@@ -417,7 +434,7 @@ func (a *Store) Remove(id params.EntityId) {
 }
 
 // Update updates the information for the given entity.
-func (a *Store) Update(info params.EntityInfo) {
+func (a *Store) Update(info EntityInfo) {
 	id := info.EntityId()
 	elem := a.entities[id]
 	if elem == nil {
@@ -440,7 +457,7 @@ func (a *Store) Update(info params.EntityInfo) {
 // Get returns the stored entity with the given
 // id, or nil if none was found. The contents of the returned entity
 // should not be changed.
-func (a *Store) Get(id params.EntityId) params.EntityInfo {
+func (a *Store) Get(id params.EntityId) EntityInfo {
 	if e := a.entities[id]; e != nil {
 		return e.Value.(*entityEntry).info
 	}

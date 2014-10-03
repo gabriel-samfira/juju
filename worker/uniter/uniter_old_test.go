@@ -12,10 +12,10 @@ import (
 
 	jc "github.com/juju/testing/checkers"
 	ft "github.com/juju/testing/filetesting"
-	gc "launchpad.net/gocheck"
+	gc "gopkg.in/check.v1"
 
+	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/state"
-	"github.com/juju/juju/state/api/params"
 )
 
 // These tests are copies of the old git-deployer-related tests, to test that

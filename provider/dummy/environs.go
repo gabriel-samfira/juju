@@ -39,15 +39,13 @@ import (
 	gitjujutesting "github.com/juju/testing"
 
 	"github.com/juju/juju/agent"
+	"github.com/juju/juju/api"
+	"github.com/juju/juju/apiserver"
+	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/constraints"
-	"github.com/juju/juju/environmentserver/authentication"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/cloudinit"
 	"github.com/juju/juju/environs/config"
-	"github.com/juju/juju/environs/imagemetadata"
-	"github.com/juju/juju/environs/simplestreams"
-	"github.com/juju/juju/environs/storage"
-	"github.com/juju/juju/environs/tools"
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/juju/arch"
 	"github.com/juju/juju/mongo"
@@ -55,9 +53,6 @@ import (
 	"github.com/juju/juju/provider"
 	"github.com/juju/juju/provider/common"
 	"github.com/juju/juju/state"
-	"github.com/juju/juju/state/api"
-	"github.com/juju/juju/state/api/params"
-	"github.com/juju/juju/state/apiserver"
 	"github.com/juju/juju/testing"
 	coretools "github.com/juju/juju/tools"
 )
@@ -85,7 +80,7 @@ func SampleConfig() testing.Attrs {
 		"state-port":                1234,
 		"api-port":                  4321,
 		"syslog-port":               2345,
-		"default-series":            "precise",
+		"default-series":            config.LatestLtsSeries(),
 
 		"secret":       "pork",
 		"state-server": true,
@@ -93,10 +88,19 @@ func SampleConfig() testing.Attrs {
 	}
 }
 
+// AdminUserTag returns the user tag used to bootstrap the dummy environment.
+// The dummy bootstrapping is handled slightly differently, and the user is
+// created as part of the bootstrap process.  This method is used to provide
+// tests a way to get to the user name that was used to initialise the
+// database, and as such, is the owner of the initial environment.
+func AdminUserTag() names.UserTag {
+	return names.NewLocalUserTag("dummy-admin")
+}
+
 // stateInfo returns a *state.Info which allows clients to connect to the
 // shared dummy state, if it exists. If preferIPv6 is true, an IPv6 endpoint
 // will be added as primary.
-func stateInfo(preferIPv6 bool) *authentication.MongoInfo {
+func stateInfo(preferIPv6 bool) *mongo.MongoInfo {
 	if gitjujutesting.MgoServer.Addr() == "" {
 		panic("dummy environ state tests must be run with MgoTestPackage")
 	}
@@ -110,7 +114,7 @@ func stateInfo(preferIPv6 bool) *authentication.MongoInfo {
 	} else {
 		addrs = []string{net.JoinHostPort("localhost", mongoPort)}
 	}
-	return &authentication.MongoInfo{
+	return &mongo.MongoInfo{
 		Info: mongo.Info{
 			Addrs:  addrs,
 			CACert: testing.CACert,
@@ -159,7 +163,7 @@ type OpStartInstance struct {
 	Constraints   constraints.Value
 	Networks      []string
 	NetworkInfo   []network.Info
-	Info          *authentication.MongoInfo
+	Info          *mongo.MongoInfo
 	Jobs          []params.MachineJob
 	APIInfo       *api.Info
 	Secret        string
@@ -237,8 +241,6 @@ type environ struct {
 	ecfgUnlocked *environConfig
 }
 
-var _ imagemetadata.SupportsCustomSources = (*environ)(nil)
-var _ tools.SupportsCustomSources = (*environ)(nil)
 var _ environs.Environ = (*environ)(nil)
 
 // discardOperations discards all Operations written to it.
@@ -607,25 +609,13 @@ func (*environ) PrecheckInstance(series string, cons constraints.Value, placemen
 	return nil
 }
 
-// GetImageSources returns a list of sources which are used to search for simplestreams image metadata.
-func (e *environ) GetImageSources() ([]simplestreams.DataSource, error) {
-	return []simplestreams.DataSource{
-		storage.NewStorageSimpleStreamsDataSource("cloud storage", e.Storage(), storage.BaseImagesPath)}, nil
-}
-
-// GetToolsSources returns a list of sources which are used to search for simplestreams tools metadata.
-func (e *environ) GetToolsSources() ([]simplestreams.DataSource, error) {
-	return []simplestreams.DataSource{
-		storage.NewStorageSimpleStreamsDataSource("cloud storage", e.Storage(), storage.BaseToolsPath)}, nil
-}
-
 func (e *environ) Bootstrap(ctx environs.BootstrapContext, args environs.BootstrapParams) (arch, series string, _ environs.BootstrapFinalizer, _ error) {
 	series = config.PreferredSeries(e.Config())
-	selectedTools, err := common.EnsureBootstrapTools(ctx, e, series, args.Constraints.Arch)
+	availableTools, err := args.AvailableTools.Match(coretools.Filter{Series: series})
 	if err != nil {
 		return "", "", nil, err
 	}
-	arch = selectedTools.Arches()[0]
+	arch = availableTools.Arches()[0]
 
 	defer delay()
 	if err := e.checkBroken("Bootstrap"); err != nil {
@@ -640,7 +630,7 @@ func (e *environ) Bootstrap(ctx environs.BootstrapContext, args environs.Bootstr
 		return "", "", nil, fmt.Errorf("no CA certificate in environment configuration")
 	}
 
-	logger.Infof("would pick tools from %s", selectedTools)
+	logger.Infof("would pick tools from %s", availableTools)
 	cfg, err := environs.BootstrapConfig(e.Config())
 	if err != nil {
 		return "", "", nil, fmt.Errorf("cannot make bootstrap config: %v", err)
@@ -676,7 +666,13 @@ func (e *environ) Bootstrap(ctx environs.BootstrapContext, args environs.Bootstr
 		// so that we can call it here.
 
 		info := stateInfo(estate.preferIPv6)
-		st, err := state.Initialize(info, cfg, mongo.DefaultDialOpts(), estate.statePolicy)
+		// Since the admin user isn't setup until after here,
+		// the password in the info structure is empty, so the admin
+		// user is constructed with an empty password here.
+		// It is set just below.
+		st, err := state.Initialize(
+			AdminUserTag(), info, cfg,
+			mongo.DefaultDialOpts(), estate.statePolicy)
 		if err != nil {
 			panic(err)
 		}
@@ -689,10 +685,20 @@ func (e *environ) Bootstrap(ctx environs.BootstrapContext, args environs.Bootstr
 		if err := st.MongoSession().DB("admin").Login("admin", password); err != nil {
 			panic(err)
 		}
-		_, err = st.AddAdminUser(password)
+		env, err := st.Environment()
 		if err != nil {
 			panic(err)
 		}
+		owner, err := st.User(env.Owner())
+		if err != nil {
+			panic(err)
+		}
+		// We log this out for test purposes only. No one in real life can use
+		// a dummy provider for anything other than testing, so logging the password
+		// here is fine.
+		logger.Debugf("setting password for %q to %q", owner.Name(), password)
+		owner.SetPassword(password)
+
 		estate.apiServer, err = apiserver.NewServer(st, estate.apiListener, apiserver.ServerConfig{
 			Cert:    []byte(testing.ServerCert),
 			Key:     []byte(testing.ServerKey),

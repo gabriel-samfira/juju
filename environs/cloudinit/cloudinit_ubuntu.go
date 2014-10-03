@@ -5,10 +5,14 @@
 package cloudinit
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"path"
 	"strings"
+	"text/template"
+	"time"
 
 	"github.com/juju/errors"
 	"github.com/juju/names"
@@ -16,7 +20,35 @@ import (
 
 	agenttool "github.com/juju/juju/agent/tools"
 	"github.com/juju/juju/cloudinit"
+	"github.com/juju/juju/environs/imagemetadata"
 	"github.com/juju/juju/service/upstart"
+)
+
+const (
+	// curlCommand is the base curl command used to download tools.
+	curlCommand = "curl -sSfw 'tools from %{url_effective} downloaded: HTTP %{http_code}; time %{time_total}s; size %{size_download} bytes; speed %{speed_download} bytes/s '"
+
+	// toolsDownloadAttempts is the number of attempts to make for
+	// each tools URL when downloading tools.
+	toolsDownloadAttempts = 5
+
+	// toolsDownloadWaitTime is the number of seconds to wait between
+	// each iterations of download attempts.
+	toolsDownloadWaitTime = 15
+
+	// toolsDownloadTemplate is a bash template that generates a
+	// bash command to cycle through a list of URLs to download tools.
+	toolsDownloadTemplate = `{{$curl := .ToolsDownloadCommand}}
+for n in $(seq {{.ToolsDownloadAttempts}}); do
+{{range .URLs}}
+    printf "Attempt $n to download tools from %s...\n" {{shquote .}}
+    {{$curl}} {{shquote .}} && echo "Tools downloaded successfully." && break
+{{end}}
+    if [ $n -lt {{.ToolsDownloadAttempts}} ]; then
+        echo "Download failed..... wait {{.ToolsDownloadWaitTime}}s"
+    fi
+    sleep {{.ToolsDownloadWaitTime}}
+done`
 )
 
 type ubuntuConfigure struct {
@@ -69,7 +101,7 @@ func (w *ubuntuConfigure) ConfigureBasic() error {
 	// the presence of the nonce file is used to gate the remainder
 	// of synchronous bootstrap.
 	noncefile := path.Join(w.mcfg.DataDir, NonceFile)
-	w.conf.AddFile(noncefile, w.mcfg.MachineNonce, 0644)
+	w.conf.AddTextFile(noncefile, w.mcfg.MachineNonce, 0644)
 	return nil
 }
 
@@ -96,9 +128,12 @@ func (w *ubuntuConfigure) ConfigureJuju() error {
 		w.conf.AddBootCmd(cloudinit.LogProgressCmd("Logging to %s on remote host", w.mcfg.CloudInitOutputLog))
 	}
 
-	if !w.mcfg.DisablePackageCommands {
-		AddAptCommands(w.mcfg.AptProxySettings, w.conf)
-	}
+	AddAptCommands(
+		w.mcfg.AptProxySettings,
+		w.conf,
+		w.mcfg.EnableOSRefreshUpdate,
+		w.mcfg.EnableOSUpgrade,
+	)
 
 	// Write out the normal proxy settings so that the settings are
 	// sourced by bash, and ssh through that.
@@ -131,34 +166,62 @@ func (w *ubuntuConfigure) ConfigureJuju() error {
 		fmt.Sprintf("chown syslog:adm %s", w.mcfg.LogDir),
 	)
 
+	w.conf.AddScripts(
+		"bin="+shquote(w.mcfg.jujuTools()),
+		"mkdir -p $bin",
+	)
+
 	// Make a directory for the tools to live in, then fetch the
 	// tools and unarchive them into it.
-	var copyCmd string
 	if strings.HasPrefix(w.mcfg.Tools.URL, fileSchemePrefix) {
-		copyCmd = fmt.Sprintf("cp %s $bin/tools.tar.gz", shquote(w.mcfg.Tools.URL[len(fileSchemePrefix):]))
+		toolsData, err := ioutil.ReadFile(w.mcfg.Tools.URL[len(fileSchemePrefix):])
+		if err != nil {
+			return err
+		}
+		w.conf.AddBinaryFile(path.Join(w.mcfg.jujuTools(), "tools.tar.gz"), []byte(toolsData), 0644)
 	} else {
-		curlCommand := "curl -sSfw 'tools from %{url_effective} downloaded: HTTP %{http_code}; time %{time_total}s; size %{size_download} bytes; speed %{speed_download} bytes/s '"
-		curlCommand += " --retry 10"
-		if w.mcfg.DisableSSLHostnameVerification {
+		curlCommand := curlCommand
+		var urls []string
+		if w.mcfg.Bootstrap {
+			curlCommand += " --retry 10"
+			if w.mcfg.DisableSSLHostnameVerification {
+				curlCommand += " --insecure"
+			}
+			urls = append(urls, w.mcfg.Tools.URL)
+		} else {
+			for _, addr := range w.mcfg.apiHostAddrs() {
+				// TODO(axw) encode env UUID in URL when EnvironTag
+				// is guaranteed to be available in APIInfo.
+				url := fmt.Sprintf("https://%s/tools/%s", addr, w.mcfg.Tools.Version)
+				urls = append(urls, url)
+			}
+			// Our API server certificates are unusable by curl (invalid subject name),
+			// so we must disable certificate validation. It doesn't actually
+			// matter, because there is no sensitive information being transmitted
+			// and we verify the tools' hash after.
 			curlCommand += " --insecure"
 		}
-		copyCmd = fmt.Sprintf("%s -o $bin/tools.tar.gz %s", curlCommand, shquote(w.mcfg.Tools.URL))
-		w.conf.AddRunCmd(cloudinit.LogProgressCmd("Fetching tools: %s", copyCmd))
+		curlCommand += " -o $bin/tools.tar.gz"
+		w.conf.AddRunCmd(cloudinit.LogProgressCmd("Fetching tools: %s <%s>", curlCommand, urls))
+		w.conf.AddRunCmd(toolsDownloadCommand(curlCommand, urls))
 	}
 	toolsJson, err := json.Marshal(w.mcfg.Tools)
 	if err != nil {
 		return err
 	}
+
 	w.conf.AddScripts(
-		"bin="+shquote(w.mcfg.jujuTools()),
-		"mkdir -p $bin",
-		copyCmd,
 		fmt.Sprintf("sha256sum $bin/tools.tar.gz > $bin/juju%s.sha256", w.mcfg.Tools.Version),
 		fmt.Sprintf(`grep '%s' $bin/juju%s.sha256 || (echo "Tools checksum mismatch"; exit 1)`,
 			w.mcfg.Tools.SHA256, w.mcfg.Tools.Version),
 		fmt.Sprintf("tar zxf $bin/tools.tar.gz -C $bin"),
-		fmt.Sprintf("rm $bin/tools.tar.gz && rm $bin/juju%s.sha256", w.mcfg.Tools.Version),
 		fmt.Sprintf("printf %%s %s > $bin/downloaded-tools.txt", shquote(string(toolsJson))),
+	)
+
+	// Don't remove tools tarball until after bootstrap agent
+	// runs, so it has a chance to add it to its catalogue.
+	defer w.conf.AddRunCmd(
+		fmt.Sprintf("rm $bin/tools.tar.gz && rm $bin/juju%s.sha256", w.mcfg.Tools.Version),
 	)
 
 	// We add the machine agent's configuration info
@@ -176,12 +239,25 @@ func (w *ubuntuConfigure) ConfigureJuju() error {
 	// Add the cloud archive cloud-tools pocket to apt sources
 	// for series that need it. This gives us up-to-date LXC,
 	// MongoDB, and other infrastructure.
-	if !w.mcfg.DisablePackageCommands {
-		series := w.mcfg.Series
-		MaybeAddCloudArchiveCloudTools(w.conf, series)
+	if w.conf.AptUpdate() {
+		MaybeAddCloudArchiveCloudTools(w.conf, w.mcfg.Tools.Version.Series)
 	}
 
 	if w.mcfg.Bootstrap {
+		var metadataDir string
+		if len(w.mcfg.CustomImageMetadata) > 0 {
+			metadataDir = path.Join(w.mcfg.DataDir, "simplestreams")
+			index, products, err := imagemetadata.MarshalImageMetadataJSON(w.mcfg.CustomImageMetadata, nil, time.Now())
+			if err != nil {
+				return err
+			}
+			indexFile := path.Join(metadataDir, imagemetadata.IndexStoragePath())
+			productFile := path.Join(metadataDir, imagemetadata.ProductMetadataStoragePath())
+			w.conf.AddTextFile(indexFile, string(index), 0644)
+			w.conf.AddTextFile(productFile, string(products), 0644)
+			metadataDir = "  --image-metadata " + shquote(metadataDir)
+		}
+
 		cons := w.mcfg.Constraints.String()
 		if cons != "" {
 			cons = " --constraints " + shquote(cons)
@@ -201,11 +277,34 @@ func (w *ubuntuConfigure) ConfigureJuju() error {
 				" --instance-id " + shquote(string(w.mcfg.InstanceId)) +
 				hardware +
 				cons +
+				metadataDir +
 				" --debug",
 		)
 	}
 
 	return w.addMachineAgentToBoot(machineTag.String())
+}
+
+// toolsDownloadCommand takes a curl command minus the source URL,
+// and generates a command that will cycle through the URLs until
+// one succeeds.
+func toolsDownloadCommand(curlCommand string, urls []string) string {
+	parsedTemplate := template.Must(
+		template.New("ToolsDownload").Funcs(
+			template.FuncMap{"shquote": shquote},
+		).Parse(toolsDownloadTemplate),
+	)
+	var buf bytes.Buffer
+	err := parsedTemplate.Execute(&buf, map[string]interface{}{
+		"ToolsDownloadCommand":  curlCommand,
+		"ToolsDownloadAttempts": toolsDownloadAttempts,
+		"ToolsDownloadWaitTime": toolsDownloadWaitTime,
+		"URLs":                  urls,
+	})
+	if err != nil {
+		panic(errors.Annotate(err, "tools download template error"))
+	}
+	return buf.String()
 }
 
 func (w *ubuntuConfigure) addMachineAgentToBoot(tag string) error {

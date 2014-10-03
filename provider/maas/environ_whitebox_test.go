@@ -9,25 +9,22 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/url"
-	"strings"
 	"text/template"
 
 	"github.com/juju/errors"
 	jc "github.com/juju/testing/checkers"
 	"github.com/juju/utils"
 	"github.com/juju/utils/set"
+	gc "gopkg.in/check.v1"
 	goyaml "gopkg.in/yaml.v1"
-	gc "launchpad.net/gocheck"
 	"launchpad.net/gomaasapi"
 
 	"github.com/juju/juju/constraints"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/bootstrap"
 	"github.com/juju/juju/environs/config"
-	"github.com/juju/juju/environs/imagemetadata"
 	"github.com/juju/juju/environs/simplestreams"
 	"github.com/juju/juju/environs/storage"
-	envtesting "github.com/juju/juju/environs/testing"
 	envtools "github.com/juju/juju/environs/tools"
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/juju/testing"
@@ -63,13 +60,9 @@ func getTestConfig(name, server, oauth, secret string) *config.Config {
 }
 
 func (suite *environSuite) setupFakeTools(c *gc.C) {
-	stor := NewStorage(suite.makeEnviron())
-	envtesting.UploadFakeTools(c, stor)
-}
-
-func (suite *environSuite) setupFakeImageMetadata(c *gc.C) {
-	stor := NewStorage(suite.makeEnviron())
-	UseTestImageMetadata(c, stor)
+	storageDir := c.MkDir()
+	suite.PatchValue(&envtools.DefaultBaseURL, "file://"+storageDir+"/tools")
+	suite.UploadFakeToolsToDirectory(c, storageDir)
 }
 
 func (suite *environSuite) addNode(jsonText string) instance.Id {
@@ -204,7 +197,7 @@ func (suite *environSuite) TestStartInstanceStartsInstance(c *gc.C) {
 	lshwXML, err := suite.generateHWTemplate(map[string]string{"aa:bb:cc:dd:ee:f0": "eth0"})
 	c.Assert(err, gc.IsNil)
 	suite.testMAASObject.TestServer.AddNodeDetails("node0", lshwXML)
-	err = bootstrap.Bootstrap(coretesting.Context(c), env, environs.BootstrapParams{})
+	err = bootstrap.Bootstrap(coretesting.Context(c), env, bootstrap.BootstrapParams{})
 	c.Assert(err, gc.IsNil)
 	// The bootstrap node has been acquired and started.
 	operations := suite.testMAASObject.TestServer.NodeOperations()
@@ -259,7 +252,7 @@ func (suite *environSuite) TestStartInstanceStartsInstance(c *gc.C) {
 	c.Check(string(decodedUserData), jc.Contains, string(data))
 
 	// Trash the tools and try to start another instance.
-	envtesting.RemoveTools(c, env.Storage())
+	suite.PatchValue(&envtools.DefaultBaseURL, "")
 	instance, _, _, err = testing.StartInstance(env, "2")
 	c.Check(instance, gc.IsNil)
 	c.Check(err, jc.Satisfies, errors.IsNotFound)
@@ -498,15 +491,12 @@ func (suite *environSuite) TestBootstrapSucceeds(c *gc.C) {
 	lshwXML, err := suite.generateHWTemplate(map[string]string{"aa:bb:cc:dd:ee:f0": "eth0"})
 	c.Assert(err, gc.IsNil)
 	suite.testMAASObject.TestServer.AddNodeDetails("thenode", lshwXML)
-	err = bootstrap.Bootstrap(coretesting.Context(c), env, environs.BootstrapParams{})
+	err = bootstrap.Bootstrap(coretesting.Context(c), env, bootstrap.BootstrapParams{})
 	c.Assert(err, gc.IsNil)
 }
 
 func (suite *environSuite) TestBootstrapFailsIfNoTools(c *gc.C) {
-	suite.setupFakeTools(c)
 	env := suite.makeEnviron()
-	// Can't RemoveAllTools, no public storage.
-	envtesting.RemoveTools(c, env.Storage())
 	// Disable auto-uploading by setting the agent version.
 	cfg, err := env.Config().Apply(map[string]interface{}{
 		"agent-version": version.Current.Number.String(),
@@ -514,17 +504,14 @@ func (suite *environSuite) TestBootstrapFailsIfNoTools(c *gc.C) {
 	c.Assert(err, gc.IsNil)
 	err = env.SetConfig(cfg)
 	c.Assert(err, gc.IsNil)
-	err = bootstrap.Bootstrap(coretesting.Context(c), env, environs.BootstrapParams{})
-	stripped := strings.Replace(err.Error(), "\n", "", -1)
-	c.Check(stripped,
-		gc.Matches,
-		"cannot upload bootstrap tools: Juju cannot bootstrap because no tools are available for your environment.*")
+	err = bootstrap.Bootstrap(coretesting.Context(c), env, bootstrap.BootstrapParams{})
+	c.Check(err, gc.ErrorMatches, "Juju cannot bootstrap because no tools are available for your environment(.|\n)*")
 }
 
 func (suite *environSuite) TestBootstrapFailsIfNoNodes(c *gc.C) {
 	suite.setupFakeTools(c)
 	env := suite.makeEnviron()
-	err := bootstrap.Bootstrap(coretesting.Context(c), env, environs.BootstrapParams{})
+	err := bootstrap.Bootstrap(coretesting.Context(c), env, bootstrap.BootstrapParams{})
 	// Since there are no nodes, the attempt to allocate one returns a
 	// 409: Conflict.
 	c.Check(err, gc.ErrorMatches, ".*409.*")
@@ -539,44 +526,6 @@ func assertSourceContents(c *gc.C, source simplestreams.DataSource, filename str
 	c.Assert(retrieved, gc.DeepEquals, content)
 }
 
-func (suite *environSuite) assertGetImageMetadataSources(c *gc.C, stream, officialSourcePath string) {
-	// Make an env configured with the stream.
-	testAttrs := maasEnvAttrs
-	testAttrs = testAttrs.Merge(coretesting.Attrs{
-		"maas-server": suite.testMAASObject.TestServer.URL,
-	})
-	if stream != "" {
-		testAttrs = testAttrs.Merge(coretesting.Attrs{
-			"image-stream": stream,
-		})
-	}
-	attrs := coretesting.FakeConfig().Merge(testAttrs)
-	cfg, err := config.New(config.NoDefaults, attrs)
-	c.Assert(err, gc.IsNil)
-	env, err := NewEnviron(cfg)
-	c.Assert(err, gc.IsNil)
-
-	// Add a dummy file to storage so we can use that to check the
-	// obtained source later.
-	data := makeRandomBytes(10)
-	stor := NewStorage(env)
-	err = stor.Put("images/filename", bytes.NewBuffer([]byte(data)), int64(len(data)))
-	c.Assert(err, gc.IsNil)
-	sources, err := imagemetadata.GetMetadataSources(env)
-	c.Assert(err, gc.IsNil)
-	c.Assert(len(sources), gc.Equals, 2)
-	assertSourceContents(c, sources[0], "filename", data)
-	url, err := sources[1].URL("")
-	c.Assert(err, gc.IsNil)
-	c.Assert(url, gc.Equals, fmt.Sprintf("http://cloud-images.ubuntu.com/%s/", officialSourcePath))
-}
-
-func (suite *environSuite) TestGetImageMetadataSources(c *gc.C) {
-	suite.assertGetImageMetadataSources(c, "", "releases")
-	suite.assertGetImageMetadataSources(c, "released", "releases")
-	suite.assertGetImageMetadataSources(c, "daily", "daily")
-}
-
 func (suite *environSuite) TestGetToolsMetadataSources(c *gc.C) {
 	env := suite.makeEnviron()
 	// Add a dummy file to storage so we can use that to check the
@@ -587,20 +536,33 @@ func (suite *environSuite) TestGetToolsMetadataSources(c *gc.C) {
 	c.Assert(err, gc.IsNil)
 	sources, err := envtools.GetMetadataSources(env)
 	c.Assert(err, gc.IsNil)
-	c.Assert(len(sources), gc.Equals, 1)
-	assertSourceContents(c, sources[0], "filename", data)
+	c.Assert(sources, gc.HasLen, 0)
 }
 
 func (suite *environSuite) TestSupportedArchitectures(c *gc.C) {
-	suite.setupFakeImageMetadata(c)
+	suite.testMAASObject.TestServer.AddBootImage("uuid-0", `{"architecture": "amd64", "release": "precise"}`)
+	suite.testMAASObject.TestServer.AddBootImage("uuid-0", `{"architecture": "amd64", "release": "trusty"}`)
+	suite.testMAASObject.TestServer.AddBootImage("uuid-1", `{"architecture": "amd64", "release": "precise"}`)
+	suite.testMAASObject.TestServer.AddBootImage("uuid-1", `{"architecture": "ppc64el", "release": "trusty"}`)
 	env := suite.makeEnviron()
 	a, err := env.SupportedArchitectures()
 	c.Assert(err, gc.IsNil)
-	c.Assert(a, jc.SameContents, []string{"amd64"})
+	c.Assert(a, jc.SameContents, []string{"amd64", "ppc64el"})
+}
+
+func (suite *environSuite) TestSupportedArchitecturesFallback(c *gc.C) {
+	// If we cannot query boot-images (e.g. MAAS server version 1.4),
+	// then Juju will fall over to listing all the available nodes.
+	suite.testMAASObject.TestServer.NewNode(`{"system_id": "node0", "architecture": "amd64/generic"}`)
+	suite.testMAASObject.TestServer.NewNode(`{"system_id": "node1", "architecture": "armhf"}`)
+	env := suite.makeEnviron()
+	a, err := env.SupportedArchitectures()
+	c.Assert(err, gc.IsNil)
+	c.Assert(a, jc.SameContents, []string{"amd64", "armhf"})
 }
 
 func (suite *environSuite) TestConstraintsValidator(c *gc.C) {
-	suite.setupFakeImageMetadata(c)
+	suite.testMAASObject.TestServer.AddBootImage("uuid-0", `{"architecture": "amd64", "release": "trusty"}`)
 	env := suite.makeEnviron()
 	validator, err := env.ConstraintsValidator()
 	c.Assert(err, gc.IsNil)
@@ -611,17 +573,17 @@ func (suite *environSuite) TestConstraintsValidator(c *gc.C) {
 }
 
 func (suite *environSuite) TestConstraintsValidatorVocab(c *gc.C) {
-	suite.setupFakeImageMetadata(c)
+	suite.testMAASObject.TestServer.AddBootImage("uuid-0", `{"architecture": "amd64", "release": "trusty"}`)
+	suite.testMAASObject.TestServer.AddBootImage("uuid-1", `{"architecture": "armhf", "release": "precise"}`)
 	env := suite.makeEnviron()
 	validator, err := env.ConstraintsValidator()
 	c.Assert(err, gc.IsNil)
 	cons := constraints.MustParse("arch=ppc64el")
 	_, err = validator.Validate(cons)
-	c.Assert(err, gc.ErrorMatches, "invalid constraint value: arch=ppc64el\nvalid values are:.*")
+	c.Assert(err, gc.ErrorMatches, "invalid constraint value: arch=ppc64el\nvalid values are: \\[amd64 armhf\\]")
 }
 
 func (suite *environSuite) TestGetNetworkMACs(c *gc.C) {
-	suite.setupFakeTools(c)
 	env := suite.makeEnviron()
 
 	suite.testMAASObject.TestServer.NewNode(`{"system_id": "node_1"}`)

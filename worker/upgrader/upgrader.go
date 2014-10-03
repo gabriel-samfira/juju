@@ -15,7 +15,7 @@ import (
 
 	"github.com/juju/juju/agent"
 	agenttools "github.com/juju/juju/agent/tools"
-	"github.com/juju/juju/state/api/upgrader"
+	"github.com/juju/juju/api/upgrader"
 	"github.com/juju/juju/state/watcher"
 	coretools "github.com/juju/juju/tools"
 	"github.com/juju/juju/version"
@@ -32,10 +32,12 @@ var logger = loggo.GetLogger("juju.worker.upgrader")
 // Upgrader represents a worker that watches the state for upgrade
 // requests.
 type Upgrader struct {
-	tomb    tomb.Tomb
-	st      *upgrader.State
-	dataDir string
-	tag     names.Tag
+	tomb             tomb.Tomb
+	st               *upgrader.State
+	dataDir          string
+	tag              names.Tag
+	origAgentVersion version.Number
+	isUpgradeRunning func() bool
 }
 
 // NewUpgrader returns a new upgrader worker. It watches changes to the
@@ -44,11 +46,18 @@ type Upgrader struct {
 // an upgrade is needed, the worker will exit with an UpgradeReadyError
 // holding details of the requested upgrade. The tools will have been
 // downloaded and unpacked.
-func NewUpgrader(st *upgrader.State, agentConfig agent.Config) *Upgrader {
+func NewUpgrader(
+	st *upgrader.State,
+	agentConfig agent.Config,
+	origAgentVersion version.Number,
+	isUpgradeRunning func() bool,
+) *Upgrader {
 	u := &Upgrader{
-		st:      st,
-		dataDir: agentConfig.DataDir(),
-		tag:     agentConfig.Tag(),
+		st:               st,
+		dataDir:          agentConfig.DataDir(),
+		tag:              agentConfig.Tag(),
+		origAgentVersion: origAgentVersion,
+		isUpgradeRunning: isUpgradeRunning,
 	}
 	go func() {
 		defer u.tomb.Done()
@@ -76,7 +85,15 @@ func (u *Upgrader) Stop() error {
 
 // allowedTargetVersion checks if targetVersion is too different from
 // curVersion to allow a downgrade.
-func allowedTargetVersion(curVersion, targetVersion version.Number) bool {
+func allowedTargetVersion(
+	origAgentVersion version.Number,
+	curVersion version.Number,
+	upgradeRunning bool,
+	targetVersion version.Number,
+) bool {
+	if upgradeRunning && targetVersion == origAgentVersion {
+		return true
+	}
 	if targetVersion.Major < curVersion.Major {
 		return false
 	}
@@ -87,11 +104,6 @@ func allowedTargetVersion(curVersion, targetVersion version.Number) bool {
 }
 
 func (u *Upgrader) loop() error {
-	currentTools := &coretools.Tools{Version: version.Current}
-	err := u.st.SetVersion(u.tag.String(), currentTools.Version)
-	if err != nil {
-		return err
-	}
 	versionWatcher, err := u.st.WatchAPIVersion(u.tag.String())
 	if err != nil {
 		return err
@@ -104,16 +116,15 @@ func (u *Upgrader) loop() error {
 	// that we attempt an upgrade even if other workers are dying
 	// all around us.
 	var (
-		dying                <-chan struct{}
-		wantTools            *coretools.Tools
-		wantVersion          version.Number
-		hostnameVerification utils.SSLHostnameVerification
+		dying       <-chan struct{}
+		wantTools   *coretools.Tools
+		wantVersion version.Number
 	)
 	for {
 		select {
 		case _, ok := <-changes:
 			if !ok {
-				return watcher.MustErr(versionWatcher)
+				return watcher.EnsureErr(versionWatcher)
 			}
 			wantVersion, err = u.st.DesiredVersion(u.tag.String())
 			if err != nil {
@@ -125,9 +136,10 @@ func (u *Upgrader) loop() error {
 		case <-dying:
 			return nil
 		}
-		if wantVersion == currentTools.Version.Number {
+		if wantVersion == version.Current.Number {
 			continue
-		} else if !allowedTargetVersion(version.Current.Number, wantVersion) {
+		} else if !allowedTargetVersion(u.origAgentVersion, version.Current.Number,
+			u.isUpgradeRunning(), wantVersion) {
 			// See also bug #1299802 where when upgrading from
 			// 1.16 to 1.18 there is a race condition that can
 			// cause the unit agent to upgrade, and then want to
@@ -137,7 +149,7 @@ func (u *Upgrader) loop() error {
 				wantVersion, version.Current)
 			continue
 		}
-		logger.Infof("upgrade requested from %v to %v", currentTools.Version, wantVersion)
+		logger.Infof("upgrade requested from %v to %v", version.Current, wantVersion)
 
 		// Check if tools have already been downloaded.
 		wantVersionBinary := toBinaryVersion(wantVersion)
@@ -146,11 +158,7 @@ func (u *Upgrader) loop() error {
 		}
 
 		// Check if tools are available for download.
-		//
-		// TODO(dimitern) 2013-10-03 bug #1234715
-		// Add a testing HTTPS storage to verify the
-		// disableSSLHostnameVerification behavior here.
-		wantTools, hostnameVerification, err = u.st.Tools(u.tag.String())
+		wantTools, err = u.st.Tools(u.tag.String())
 		if err != nil {
 			// Not being able to lookup Tools is considered fatal
 			return err
@@ -160,7 +168,7 @@ func (u *Upgrader) loop() error {
 		// repeatedly (causing the agent to be stopped), as long
 		// as we have got as far as this, we will still be able to
 		// upgrade the agent.
-		err := u.ensureTools(wantTools, hostnameVerification)
+		err := u.ensureTools(wantTools)
 		if err == nil {
 			return u.newUpgradeReadyError(wantTools.Version)
 		}
@@ -189,10 +197,11 @@ func (u *Upgrader) newUpgradeReadyError(newVersion version.Binary) *UpgradeReady
 	}
 }
 
-func (u *Upgrader) ensureTools(agentTools *coretools.Tools, hostnameVerification utils.SSLHostnameVerification) error {
+func (u *Upgrader) ensureTools(agentTools *coretools.Tools) error {
 	logger.Infof("fetching tools from %q", agentTools.URL)
-	client := utils.GetHTTPClient(hostnameVerification)
-	resp, err := client.Get(agentTools.URL)
+	// The reader MUST verify the tools' hash, so there is no
+	// need to validate the peer. We cannot anyway: see http://pad.lv/1261780.
+	resp, err := utils.GetNonValidatingHTTPClient().Get(agentTools.URL)
 	if err != nil {
 		return err
 	}

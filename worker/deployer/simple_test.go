@@ -14,11 +14,11 @@ import (
 
 	"github.com/juju/names"
 	jc "github.com/juju/testing/checkers"
-	gc "launchpad.net/gocheck"
+	gc "gopkg.in/check.v1"
 
 	"github.com/juju/juju/agent"
 	"github.com/juju/juju/agent/tools"
-	"github.com/juju/juju/state/api/params"
+	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/testing"
 	coretools "github.com/juju/juju/tools"
 	"github.com/juju/juju/version"
@@ -247,7 +247,7 @@ func (fix *SimpleToolsFixture) checkUnitRemoved(c *gc.C, name string) {
 	for _, path := range []string{confPath, agentDir, toolsDir} {
 		_, err := ioutil.ReadFile(path)
 		if err == nil {
-			c.Log("Warning: %q not removed as expected", path)
+			c.Logf("Warning: %q not removed as expected", path)
 		} else {
 			c.Assert(err, jc.Satisfies, os.IsNotExist)
 		}

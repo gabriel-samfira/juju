@@ -18,14 +18,14 @@ import (
 	"launchpad.net/gnuflag"
 
 	"github.com/juju/juju/agent"
+	"github.com/juju/juju/api"
+	apiagent "github.com/juju/juju/api/agent"
+	apideployer "github.com/juju/juju/api/deployer"
+	apirsyslog "github.com/juju/juju/api/rsyslog"
+	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/juju/paths"
 	"github.com/juju/juju/network"
 	"github.com/juju/juju/state"
-	"github.com/juju/juju/state/api"
-	apiagent "github.com/juju/juju/state/api/agent"
-	apideployer "github.com/juju/juju/state/api/deployer"
-	"github.com/juju/juju/state/api/params"
-	apirsyslog "github.com/juju/juju/state/api/rsyslog"
 	"github.com/juju/juju/version"
 	"github.com/juju/juju/worker"
 	"github.com/juju/juju/worker/deployer"
@@ -251,10 +251,8 @@ func openAPIState(agentConfig agent.Config, a Agent) (_ *api.State, _ *apiagent.
 		}
 	}
 	if err != nil {
-		if params.IsCodeNotProvisioned(err) {
-			return nil, nil, worker.ErrTerminateAgent
-		}
-		if params.IsCodeUnauthorized(err) {
+		if params.IsCodeNotProvisioned(err) || params.IsCodeUnauthorized(err) {
+			logger.Errorf("agent terminating due to error returned during API open: %v", err)
 			return nil, nil, worker.ErrTerminateAgent
 		}
 		return nil, nil, err
@@ -266,10 +264,12 @@ func openAPIState(agentConfig agent.Config, a Agent) (_ *api.State, _ *apiagent.
 	}()
 	entity, err := st.Agent().Entity(a.Tag())
 	if err == nil && entity.Life() == params.Dead {
+		logger.Errorf("agent terminating - entity %q is dead", a.Tag())
 		return nil, nil, worker.ErrTerminateAgent
 	}
 	if err != nil {
 		if params.IsCodeUnauthorized(err) {
+			logger.Errorf("agent terminating due to error returned during entity lookup: %v", err)
 			return nil, nil, worker.ErrTerminateAgent
 		}
 		return nil, nil, err

@@ -1,14 +1,15 @@
 package juju
 
 import (
+	"github.com/juju/juju/api"
 	"github.com/juju/juju/environs/configstore"
-	"github.com/juju/juju/state/api"
 )
 
 var (
 	ProviderConnectDelay = &providerConnectDelay
 	GetConfig            = getConfig
 	CacheChangedAPIInfo  = cacheChangedAPIInfo
+	EnvironInfoUserTag   = environInfoUserTag
 )
 
 type APIState apiState

@@ -9,18 +9,20 @@ import (
 
 	jc "github.com/juju/testing/checkers"
 	"github.com/juju/utils/shell"
-	gc "launchpad.net/gocheck"
+	gc "gopkg.in/check.v1"
 
 	"github.com/juju/juju/agent"
+	"github.com/juju/juju/apiserver/client"
+	"github.com/juju/juju/apiserver/params"
 	coreCloudinit "github.com/juju/juju/cloudinit"
 	"github.com/juju/juju/cloudinit/sshinit"
 	"github.com/juju/juju/environs/cloudinit"
 	"github.com/juju/juju/environs/manual"
 	envtesting "github.com/juju/juju/environs/testing"
+	envtools "github.com/juju/juju/environs/tools"
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/juju/testing"
-	"github.com/juju/juju/state/api/params"
-	"github.com/juju/juju/state/apiserver/client"
+	coretesting "github.com/juju/juju/testing"
 	"github.com/juju/juju/version"
 )
 
@@ -36,13 +38,14 @@ func (s *provisionerSuite) getArgs(c *gc.C) manual.ProvisionMachineArgs {
 	client := s.APIState.Client()
 	s.AddCleanup(func(*gc.C) { client.Close() })
 	return manual.ProvisionMachineArgs{
-		Host:   hostname,
-		Client: client,
+		Host:           hostname,
+		Client:         client,
+		UpdateBehavior: &params.UpdateBehavior{true, true},
 	}
 }
 
 func (s *provisionerSuite) TestProvisionMachine(c *gc.C) {
-	const series = "precise"
+	const series = coretesting.FakeDefaultSeries
 	const arch = "amd64"
 	const operatingSystem = version.Ubuntu
 
@@ -50,7 +53,9 @@ func (s *provisionerSuite) TestProvisionMachine(c *gc.C) {
 	hostname := args.Host
 	args.Host = "ubuntu@" + args.Host
 
-	envtesting.RemoveTools(c, s.Environ.Storage())
+	defaultToolsURL := envtools.DefaultBaseURL
+	envtools.DefaultBaseURL = ""
+
 	defer fakeSSH{
 		Series:             series,
 		Arch:               arch,
@@ -66,7 +71,8 @@ func (s *provisionerSuite) TestProvisionMachine(c *gc.C) {
 	number, ok := cfg.AgentVersion()
 	c.Assert(ok, jc.IsTrue)
 	binVersion := version.Binary{number, series, arch, operatingSystem}
-	envtesting.AssertUploadFakeToolsVersions(c, s.Environ.Storage(), binVersion)
+	envtesting.AssertUploadFakeToolsVersions(c, s.DefaultToolsStorage, binVersion)
+	envtools.DefaultBaseURL = defaultToolsURL
 
 	for i, errorCode := range []int{255, 0} {
 		c.Logf("test %d: code %d", i, errorCode)
@@ -116,7 +122,7 @@ func (s *provisionerSuite) TestProvisionMachine(c *gc.C) {
 }
 
 func (s *provisionerSuite) TestFinishMachineConfig(c *gc.C) {
-	const series = "precise"
+	const series = coretesting.FakeDefaultSeries
 	const arch = "amd64"
 	defer fakeSSH{
 		Series:         series,
@@ -140,17 +146,25 @@ func (s *provisionerSuite) TestFinishMachineConfig(c *gc.C) {
 }
 
 func (s *provisionerSuite) TestProvisioningScript(c *gc.C) {
-	const series = "precise"
+	const series = coretesting.FakeDefaultSeries
 	const arch = "amd64"
 	defer fakeSSH{
 		Series:         series,
 		Arch:           arch,
 		InitUbuntuUser: true,
 	}.install(c).Restore()
+
 	machineId, err := manual.ProvisionMachine(s.getArgs(c))
 	c.Assert(err, gc.IsNil)
 
+	err = s.State.UpdateEnvironConfig(
+		map[string]interface{}{
+			"enable-os-upgrade": false,
+		}, nil, nil)
+	c.Assert(err, gc.IsNil)
+
 	mcfg, err := client.MachineConfig(s.State, machineId, agent.BootstrapNonce, "/var/lib/juju")
+
 	c.Assert(err, gc.IsNil)
 	script, err := manual.ProvisioningScript(mcfg)
 	c.Assert(err, gc.IsNil)

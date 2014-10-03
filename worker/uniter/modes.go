@@ -6,12 +6,13 @@ package uniter
 import (
 	stderrors "errors"
 	"fmt"
+	"time"
 
-	"gopkg.in/juju/charm.v3"
-	"gopkg.in/juju/charm.v3/hooks"
+	"gopkg.in/juju/charm.v4"
+	"gopkg.in/juju/charm.v4/hooks"
 	"launchpad.net/tomb"
 
-	"github.com/juju/juju/state/api/params"
+	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/state/watcher"
 	"github.com/juju/juju/worker"
 	ucharm "github.com/juju/juju/worker/uniter/charm"
@@ -176,7 +177,7 @@ func ModeTerminating(u *Uniter) (next Mode, err error) {
 			hi = hook.Info{Kind: info.Kind, ActionId: info.ActionId}
 		case _, ok := <-w.Changes():
 			if !ok {
-				return nil, watcher.MustErr(w)
+				return nil, watcher.EnsureErr(w)
 			}
 			if err := u.unit.Refresh(); err != nil {
 				return nil, err
@@ -240,17 +241,22 @@ func ModeAbide(u *Uniter) (next Mode, err error) {
 // is in an Alive state.
 func modeAbideAliveLoop(u *Uniter) (Mode, error) {
 	for {
+		collectMetricsSignal := collectMetricsAt(time.Now(), time.Unix(u.s.CollectMetricsTime, 0), metricsPollInterval)
 		hi := hook.Info{}
 		select {
 		case <-u.tomb.Dying():
 			return nil, tomb.ErrDying
 		case <-u.f.UnitDying():
 			return modeAbideDyingLoop(u)
+		case <-u.f.MeterStatusEvents():
+			hi = hook.Info{Kind: hooks.MeterStatusChanged}
 		case <-u.f.ConfigEvents():
 			hi = hook.Info{Kind: hooks.ConfigChanged}
 		case info := <-u.f.ActionEvents():
 			hi = hook.Info{Kind: info.Kind, ActionId: info.ActionId}
 		case hi = <-u.relationHooks:
+		case <-collectMetricsSignal:
+			hi = hook.Info{Kind: hooks.CollectMetrics}
 		case ids := <-u.f.RelationsEvents():
 			added, err := u.updateRelations(ids)
 			if err != nil {
@@ -313,13 +319,15 @@ func modeAbideDyingLoop(u *Uniter) (next Mode, err error) {
 // * user resolution of hook errors
 // * forced charm upgrade requests
 func ModeHookError(u *Uniter) (next Mode, err error) {
+	// TODO(binary132): In case of a crashed Action, simply set it to
+	// failed and return to ModeContinue.
 	defer modeContext("ModeHookError", &err)()
 	if u.s.Op != RunHook || u.s.OpStep != Pending {
 		return nil, fmt.Errorf("insane uniter state: %#v", u.s)
 	}
 	msg := fmt.Sprintf("hook failed: %q", u.currentHookName())
 	// Create error information for status.
-	data := params.StatusData{"hook": u.currentHookName()}
+	data := map[string]interface{}{"hook": u.currentHookName()}
 	if u.s.Hook.Kind.IsRelation() {
 		data["relation-id"] = u.s.Hook.RelationId
 		if u.s.Hook.RemoteUnit != "" {
@@ -332,12 +340,9 @@ func ModeHookError(u *Uniter) (next Mode, err error) {
 	u.f.WantResolvedEvent()
 	u.f.WantUpgradeEvent(true)
 	for {
-		hi := hook.Info{}
 		select {
 		case <-u.tomb.Dying():
 			return nil, tomb.ErrDying
-		case info := <-u.f.ActionEvents():
-			hi = hook.Info{Kind: info.Kind, ActionId: info.ActionId}
 		case rm := <-u.f.ResolvedEvents():
 			switch rm {
 			case params.ResolvedRetryHooks:
@@ -358,11 +363,6 @@ func ModeHookError(u *Uniter) (next Mode, err error) {
 			return ModeContinue, nil
 		case curl := <-u.f.UpgradeEvents():
 			return ModeUpgrading(curl), nil
-		}
-		if err := u.runHook(hi); err == errHookFailed {
-			return ModeHookError, nil
-		} else if err != nil {
-			return nil, err
 		}
 	}
 }

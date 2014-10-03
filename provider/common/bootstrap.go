@@ -20,7 +20,6 @@ import (
 	coreCloudinit "github.com/juju/juju/cloudinit"
 	"github.com/juju/juju/cloudinit/sshinit"
 	"github.com/juju/juju/environs"
-	"github.com/juju/juju/environs/bootstrap"
 	"github.com/juju/juju/environs/cloudinit"
 	"github.com/juju/juju/environs/config"
 	"github.com/juju/juju/instance"
@@ -39,14 +38,9 @@ func Bootstrap(ctx environs.BootstrapContext, env environs.Environ, args environ
 	// If two Bootstraps are called concurrently, there's
 	// no way to make sure that only one succeeds.
 
-	var inst instance.Instance
-	defer func() { handleBootstrapError(err, ctx, inst, env) }()
-
-	network.InitializeFromConfig(env.Config())
-
 	// First thing, ensure we have tools otherwise there's no point.
 	series = config.PreferredSeries(env.Config())
-	selectedTools, err := EnsureBootstrapTools(ctx, env, series, args.Constraints.Arch)
+	availableTools, err := args.AvailableTools.Match(coretools.Filter{Series: series})
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -60,14 +54,17 @@ func Bootstrap(ctx environs.BootstrapContext, env environs.Environ, args environ
 		return "", "", nil, fmt.Errorf("no SSH client available")
 	}
 
-	machineConfig, err := environs.NewBootstrapMachineConfig(args.Constraints, "", series)
+	machineConfig, err := environs.NewBootstrapMachineConfig(args.Constraints, series)
 	if err != nil {
 		return "", "", nil, err
 	}
+	machineConfig.EnableOSRefreshUpdate = env.Config().EnableOSRefreshUpdate()
+	machineConfig.EnableOSUpgrade = env.Config().EnableOSUpgrade()
+
 	fmt.Fprintln(ctx.GetStderr(), "Launching instance")
 	inst, hw, _, err := env.StartInstance(environs.StartInstanceParams{
 		Constraints:   args.Constraints,
-		Tools:         selectedTools,
+		Tools:         availableTools,
 		MachineConfig: machineConfig,
 		Placement:     args.Placement,
 	})
@@ -76,12 +73,6 @@ func Bootstrap(ctx environs.BootstrapContext, env environs.Environ, args environ
 	}
 	fmt.Fprintf(ctx.GetStderr(), " - %s\n", inst.Id())
 
-	err = SaveState(env.Storage(), &BootstrapState{
-		StateInstances: []instance.Id{inst.Id()},
-	})
-	if err != nil {
-		return "", "", nil, fmt.Errorf("cannot save state: %v", err)
-	}
 	finalize := func(ctx environs.BootstrapContext, mcfg *cloudinit.MachineConfig) error {
 		mcfg.InstanceId = inst.Id()
 		mcfg.HardwareCharacteristics = hw
@@ -91,41 +82,6 @@ func Bootstrap(ctx environs.BootstrapContext, env environs.Environ, args environ
 		return FinishBootstrap(ctx, client, inst, mcfg)
 	}
 	return *hw.Arch, series, finalize, nil
-}
-
-// handleBootstrapError cleans up after a failed bootstrap.
-func handleBootstrapError(err error, ctx environs.BootstrapContext, inst instance.Instance, env environs.Environ) {
-	if err == nil {
-		return
-	}
-
-	logger.Errorf("bootstrap failed: %v", err)
-	ch := make(chan os.Signal, 1)
-	ctx.InterruptNotify(ch)
-	defer ctx.StopInterruptNotify(ch)
-	defer close(ch)
-	go func() {
-		for _ = range ch {
-			fmt.Fprintln(ctx.GetStderr(), "Cleaning up failed bootstrap")
-		}
-	}()
-
-	if inst != nil {
-		fmt.Fprintln(ctx.GetStderr(), "Stopping instance...")
-		if stoperr := env.StopInstances(inst.Id()); stoperr != nil {
-			logger.Errorf("cannot stop failed bootstrap instance %q: %v", inst.Id(), stoperr)
-		} else {
-			// set to nil so we know we can safely delete the state file
-			inst = nil
-		}
-	}
-	// We only delete the bootstrap state file if either we didn't
-	// start an instance, or we managed to cleanly stop it.
-	if inst == nil {
-		if rmerr := DeleteStateFile(env.Storage()); rmerr != nil {
-			logger.Errorf("cannot delete bootstrap state file: %v", rmerr)
-		}
-	}
 }
 
 // FinishBootstrap completes the bootstrap process by connecting
@@ -176,6 +132,9 @@ func ConfigureMachine(ctx environs.BootstrapContext, client ssh.Client, host str
 	// point. For that reason, we do not call StopInterruptNotify
 	// until this function completes.
 	cloudcfg := coreCloudinit.New()
+	cloudcfg.SetAptUpdate(machineConfig.EnableOSRefreshUpdate)
+	cloudcfg.SetAptUpgrade(machineConfig.EnableOSUpgrade)
+
 	udata, err := cloudinit.NewUserdataConfig(machineConfig, cloudcfg)
 	if err != nil {
 		return err
@@ -391,15 +350,4 @@ func waitSSH(ctx environs.BootstrapContext, interrupted <-chan os.Signal, client
 			return result.(*hostChecker).addr.Value, nil
 		}
 	}
-}
-
-// EnsureBootstrapTools finds tools, syncing with an external tools source as
-// necessary; it then selects the newest tools to bootstrap with, and sets
-// agent-version.
-func EnsureBootstrapTools(ctx environs.BootstrapContext, env environs.Environ, series string, arch *string) (coretools.List, error) {
-	possibleTools, err := bootstrap.EnsureToolsAvailability(ctx, env, series, arch)
-	if err != nil {
-		return nil, err
-	}
-	return bootstrap.SetBootstrapTools(env, possibleTools)
 }

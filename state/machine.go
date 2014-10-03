@@ -18,11 +18,11 @@ import (
 	"gopkg.in/mgo.v2/bson"
 	"gopkg.in/mgo.v2/txn"
 
+	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/constraints"
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/mongo"
 	"github.com/juju/juju/network"
-	"github.com/juju/juju/state/api/params"
 	"github.com/juju/juju/state/presence"
 	"github.com/juju/juju/tools"
 	"github.com/juju/juju/version"
@@ -70,16 +70,6 @@ func (job MachineJob) ToParams() params.MachineJob {
 	return params.MachineJob(fmt.Sprintf("<unknown job %d>", int(job)))
 }
 
-// MachineJobFromParams returns the job corresponding to params.MachineJob.
-func MachineJobFromParams(job params.MachineJob) (MachineJob, error) {
-	for machineJob, paramJob := range jobNames {
-		if paramJob == job {
-			return machineJob, nil
-		}
-	}
-	return -1, fmt.Errorf("invalid machine job %q", job)
-}
-
 // paramsJobsFromJobs converts state jobs to params jobs.
 func paramsJobsFromJobs(jobs []MachineJob) []params.MachineJob {
 	paramsJobs := make([]params.MachineJob, len(jobs))
@@ -94,7 +84,7 @@ func (job MachineJob) String() string {
 }
 
 // machineDoc represents the internal state of a machine in MongoDB.
-// Note the correspondence with MachineInfo in state/api/params.
+// Note the correspondence with MachineInfo in apiserver/params.
 type machineDoc struct {
 	Id            string `bson:"_id"`
 	Nonce         string
@@ -255,7 +245,7 @@ func (m *Machine) SetHasVote(hasVote bool) error {
 		Update: bson.D{{"$set", bson.D{{"hasvote", hasVote}}}},
 	}}
 	if err := m.st.runTransaction(ops); err != nil {
-		return fmt.Errorf("cannot set HasVote of machine %v: %v", m, onAbort(err, errDead))
+		return fmt.Errorf("cannot set HasVote of machine %v: %v", m, onAbort(err, ErrDead))
 	}
 	m.doc.HasVote = hasVote
 	return nil
@@ -323,7 +313,7 @@ func (m *Machine) SetAgentVersion(v version.Binary) (err error) {
 		Update: bson.D{{"$set", bson.D{{"tools", tools}}}},
 	}}
 	if err := m.st.runTransaction(ops); err != nil {
-		return onAbort(err, errDead)
+		return onAbort(err, ErrDead)
 	}
 	m.doc.Tools = tools
 	return nil
@@ -358,7 +348,7 @@ func (m *Machine) setPasswordHash(passwordHash string) error {
 		Update: bson.D{{"$set", bson.D{{"passwordhash", passwordHash}}}},
 	}}
 	if err := m.st.runTransaction(ops); err != nil {
-		return fmt.Errorf("cannot set password of machine %v: %v", m, onAbort(err, errDead))
+		return fmt.Errorf("cannot set password of machine %v: %v", m, onAbort(err, ErrDead))
 	}
 	m.doc.PasswordHash = passwordHash
 	return nil
@@ -582,7 +572,7 @@ func (m *Machine) removePortsOps() ([]txn.Op, error) {
 	if m.doc.Life != Dead {
 		return nil, errors.Errorf("machine is not dead")
 	}
-	ports, err := m.OpenedPorts(m.st)
+	ports, err := m.AllPorts()
 	if err != nil {
 		return nil, err
 	}
@@ -646,6 +636,7 @@ func (m *Machine) Remove() (err error) {
 		removeConstraintsOp(m.st, m.globalKey()),
 		removeRequestedNetworksOp(m.st, m.globalKey()),
 		annotationRemoveOp(m.st, m.globalKey()),
+		removeRebootDocOps(m.globalKey()),
 	}
 	ifacesOps, err := m.removeNetworkInterfacesOps()
 	if err != nil {
@@ -670,13 +661,13 @@ func (m *Machine) Refresh() error {
 	machines, closer := m.st.getCollection(machinesC)
 	defer closer()
 
-	doc := machineDoc{}
+	var doc machineDoc
 	err := machines.FindId(m.doc.Id).One(&doc)
 	if err == mgo.ErrNotFound {
 		return errors.NotFoundf("machine %v", m)
 	}
 	if err != nil {
-		return fmt.Errorf("cannot refresh machine %v: %v", m, err)
+		return errors.Annotatef(err, "cannot refresh machine %v", m)
 	}
 	m.doc = doc
 	return nil
@@ -1010,7 +1001,7 @@ func (m *Machine) setAddresses(addresses []network.Address, field *[]address, fi
 			}
 		}
 		if m.doc.Life == Dead {
-			return nil, errDead
+			return nil, ErrDead
 		}
 		op := txn.Op{
 			C:      machinesC,
@@ -1232,7 +1223,7 @@ func (m *Machine) SetConstraints(cons constraints.Value) (err error) {
 }
 
 // Status returns the status of the machine.
-func (m *Machine) Status() (status params.Status, info string, data params.StatusData, err error) {
+func (m *Machine) Status() (status Status, info string, data map[string]interface{}, err error) {
 	doc, err := getStatus(m.st, m.globalKey())
 	if err != nil {
 		return "", "", nil, err
@@ -1244,7 +1235,7 @@ func (m *Machine) Status() (status params.Status, info string, data params.Statu
 }
 
 // SetStatus sets the status of the machine.
-func (m *Machine) SetStatus(status params.Status, info string, data params.StatusData) error {
+func (m *Machine) SetStatus(status Status, info string, data map[string]interface{}) error {
 	doc := statusDoc{
 		Status:     status,
 		StatusInfo: info,
@@ -1329,7 +1320,9 @@ func (m *Machine) updateSupportedContainers(supportedContainers []instance.Conta
 		},
 	}
 	if err = m.st.runTransaction(ops); err != nil {
-		return fmt.Errorf("cannot update supported containers of machine %v: %v", m, onAbort(err, errDead))
+		err = onAbort(err, ErrDead)
+		logger.Errorf("cannot update supported containers of machine %v: %v", m, err)
+		return err
 	}
 	m.doc.SupportedContainers = supportedContainers
 	m.doc.SupportedContainersKnown = true
@@ -1357,10 +1350,10 @@ func (m *Machine) markInvalidContainers() error {
 				logger.Errorf("finding status of container %v to mark as invalid: %v", containerId, err)
 				continue
 			}
-			if status == params.StatusPending {
+			if status == StatusPending {
 				containerType := ContainerTypeFromId(containerId)
 				container.SetStatus(
-					params.StatusError, "unsupported container", params.StatusData{"type": containerType})
+					StatusError, "unsupported container", map[string]interface{}{"type": containerType})
 			} else {
 				logger.Errorf("unsupported container %v has unexpected status %v", containerId, status)
 			}

@@ -5,7 +5,7 @@ package network_test
 
 import (
 	jc "github.com/juju/testing/checkers"
-	gc "launchpad.net/gocheck"
+	gc "gopkg.in/check.v1"
 
 	"github.com/juju/juju/network"
 	"github.com/juju/juju/testing"
@@ -35,6 +35,12 @@ func (n *InfoSuite) TestIsVirtual(c *gc.C) {
 	c.Check(n.info[0].IsVirtual(), jc.IsTrue)
 	c.Check(n.info[1].IsVirtual(), jc.IsFalse)
 	c.Check(n.info[2].IsVirtual(), jc.IsTrue)
+}
+
+func (n *InfoSuite) TestIsVLAN(c *gc.C) {
+	c.Check(n.info[0].IsVLAN(), jc.IsTrue)
+	c.Check(n.info[1].IsVLAN(), jc.IsFalse)
+	c.Check(n.info[2].IsVLAN(), jc.IsTrue)
 }
 
 type NetworkSuite struct {

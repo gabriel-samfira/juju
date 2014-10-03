@@ -18,7 +18,7 @@ import (
 
 var logger = loggo.GetLogger("juju.environs.tools")
 
-func makeToolsConstraint(cloudSpec simplestreams.CloudSpec, majorVersion, minorVersion int,
+func makeToolsConstraint(cloudSpec simplestreams.CloudSpec, stream string, majorVersion, minorVersion int,
 	filter coretools.Filter) (*ToolsConstraint, error) {
 
 	var toolsConstraint *ToolsConstraint
@@ -34,10 +34,10 @@ func makeToolsConstraint(cloudSpec simplestreams.CloudSpec, majorVersion, minorV
 			return nil, coretools.ErrNoMatches
 		}
 		toolsConstraint = NewVersionedToolsConstraint(filter.Number,
-			simplestreams.LookupParams{CloudSpec: cloudSpec})
+			simplestreams.LookupParams{CloudSpec: cloudSpec, Stream: stream})
 	} else {
-		toolsConstraint = NewGeneralToolsConstraint(majorVersion, minorVersion, filter.Released,
-			simplestreams.LookupParams{CloudSpec: cloudSpec})
+		toolsConstraint = NewGeneralToolsConstraint(majorVersion, minorVersion,
+			simplestreams.LookupParams{CloudSpec: cloudSpec, Stream: stream})
 	}
 	if filter.Arch != "" {
 		toolsConstraint.Arches = []string{filter.Arch}
@@ -68,11 +68,11 @@ const DoNotAllowRetry = false
 // If minorVersion = -1, then only majorVersion is considered.
 // If no *available* tools have the supplied major.minor version number, or match the
 // supplied filter, the function returns a *NotFoundError.
-func FindTools(cloudInst environs.ConfigGetter, majorVersion, minorVersion int,
-	filter coretools.Filter, allowRetry bool) (list coretools.List, err error) {
+func FindTools(env environs.Environ, majorVersion, minorVersion int,
+	filter coretools.Filter) (list coretools.List, err error) {
 
 	var cloudSpec simplestreams.CloudSpec
-	if inst, ok := cloudInst.(simplestreams.HasRegion); ok {
+	if inst, ok := env.(simplestreams.HasRegion); ok {
 		if cloudSpec, err = inst.Region(); err != nil {
 			return nil, err
 		}
@@ -99,26 +99,31 @@ func FindTools(cloudInst environs.ConfigGetter, majorVersion, minorVersion int,
 	if filter.Arch != "" {
 		logger.Infof("filtering tools by architecture: %s", filter.Arch)
 	}
-	sources, err := GetMetadataSourcesWithRetries(cloudInst, allowRetry)
+	sources, err := GetMetadataSources(env)
 	if err != nil {
 		return nil, err
 	}
-	return FindToolsForCloud(sources, cloudSpec, majorVersion, minorVersion, filter)
+	stream := env.Config().ToolsStream()
+	// For backwards compatibility with the config "development" attribute.
+	if stream == "" || env.Config().Development() {
+		stream = TestingStream
+	}
+	return FindToolsForCloud(sources, cloudSpec, stream, majorVersion, minorVersion, filter)
 }
 
-// FindToolsForCloud returns a List containing all tools with a given
+// FindToolsForCloud returns a List containing all tools in the given stream, with a given
 // major.minor version number and cloudSpec, filtered by filter.
 // If minorVersion = -1, then only majorVersion is considered.
 // If no *available* tools have the supplied major.minor version number, or match the
 // supplied filter, the function returns a *NotFoundError.
-func FindToolsForCloud(sources []simplestreams.DataSource, cloudSpec simplestreams.CloudSpec,
+func FindToolsForCloud(sources []simplestreams.DataSource, cloudSpec simplestreams.CloudSpec, stream string,
 	majorVersion, minorVersion int, filter coretools.Filter) (list coretools.List, err error) {
 
-	toolsConstraint, err := makeToolsConstraint(cloudSpec, majorVersion, minorVersion, filter)
+	toolsConstraint, err := makeToolsConstraint(cloudSpec, stream, majorVersion, minorVersion, filter)
 	if err != nil {
 		return nil, err
 	}
-	toolsMetadata, _, err := Fetch(sources, simplestreams.DefaultIndexPath, toolsConstraint, false)
+	toolsMetadata, _, err := Fetch(sources, toolsConstraint, false)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			err = ErrNoTools
@@ -145,50 +150,6 @@ func FindToolsForCloud(sources []simplestreams.DataSource, cloudSpec simplestrea
 	return list, err
 }
 
-// The following allows FindTools, as called by FindBootstrapTools, to be patched for testing.
-var bootstrapFindTools = FindTools
-
-type findtoolsfunc func(environs.ConfigGetter, int, int, coretools.Filter, bool) (coretools.List, error)
-
-func TestingPatchBootstrapFindTools(stub findtoolsfunc) func() {
-	origFunc := bootstrapFindTools
-	bootstrapFindTools = stub
-	return func() {
-		bootstrapFindTools = origFunc
-	}
-}
-
-// BootstrapToolsParams contains parameters for FindBootstrapTools
-type BootstrapToolsParams struct {
-	Version    *version.Number
-	Arch       *string
-	Series     string
-	AllowRetry bool
-}
-
-// FindBootstrapTools returns a ToolsList containing only those tools with
-// which it would be reasonable to launch an environment's first machine, given the supplied constraints.
-// If a specific agent version is not requested, all tools matching the current major.minor version are chosen.
-func FindBootstrapTools(cloudInst environs.ConfigGetter, params BootstrapToolsParams) (list coretools.List, err error) {
-	// Construct a tools filter.
-	cfg := cloudInst.Config()
-	cliVersion := version.Current.Number
-	filter := coretools.Filter{
-		Series: params.Series,
-		Arch:   stringOrEmpty(params.Arch),
-	}
-	if params.Version != nil {
-		// If we already have an explicit agent version set, we're done.
-		filter.Number = *params.Version
-		return bootstrapFindTools(cloudInst, cliVersion.Major, cliVersion.Minor, filter, params.AllowRetry)
-	}
-	if dev := cliVersion.IsDev() || cfg.Development(); !dev {
-		logger.Infof("filtering tools by released version")
-		filter.Released = true
-	}
-	return bootstrapFindTools(cloudInst, cliVersion.Major, cliVersion.Minor, filter, params.AllowRetry)
-}
-
 func stringOrEmpty(pstr *string) string {
 	if pstr == nil {
 		return ""
@@ -196,25 +157,8 @@ func stringOrEmpty(pstr *string) string {
 	return *pstr
 }
 
-// FindInstanceTools returns a ToolsList containing only those tools with which
-// it would be reasonable to start a new instance, given the supplied series and arch.
-func FindInstanceTools(cloudInst environs.ConfigGetter,
-	vers version.Number, series string, arch *string) (list coretools.List, err error) {
-
-	// Construct a tools filter.
-	// Discard all that are known to be irrelevant.
-	filter := coretools.Filter{
-		Number: vers,
-		Series: series,
-		Arch:   stringOrEmpty(arch),
-	}
-	return FindTools(cloudInst, vers.Major, vers.Minor, filter, DoNotAllowRetry)
-}
-
 // FindExactTools returns only the tools that match the supplied version.
-func FindExactTools(cloudInst environs.ConfigGetter,
-	vers version.Number, series string, arch string) (t *coretools.Tools, err error) {
-
+func FindExactTools(env environs.Environ, vers version.Number, series string, arch string) (t *coretools.Tools, err error) {
 	logger.Infof("finding exact version %s", vers)
 	// Construct a tools filter.
 	// Discard all that are known to be irrelevant.
@@ -223,7 +167,7 @@ func FindExactTools(cloudInst environs.ConfigGetter,
 		Series: series,
 		Arch:   arch,
 	}
-	availableTools, err := FindTools(cloudInst, vers.Major, vers.Minor, filter, DoNotAllowRetry)
+	availableTools, err := FindTools(env, vers.Major, vers.Minor, filter)
 	if err != nil {
 		return nil, err
 	}

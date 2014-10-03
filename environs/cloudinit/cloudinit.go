@@ -19,13 +19,14 @@ import (
 
 	"github.com/juju/juju/agent"
 	agenttools "github.com/juju/juju/agent/tools"
+	"github.com/juju/juju/api"
+	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/cloudinit"
 	"github.com/juju/juju/constraints"
-	"github.com/juju/juju/environmentserver/authentication"
 	"github.com/juju/juju/environs/config"
+	"github.com/juju/juju/environs/imagemetadata"
 	"github.com/juju/juju/instance"
-	"github.com/juju/juju/state/api"
-	"github.com/juju/juju/state/api/params"
+	"github.com/juju/juju/mongo"
 	coretools "github.com/juju/juju/tools"
 	"github.com/juju/juju/version"
 )
@@ -51,7 +52,7 @@ type MachineConfig struct {
 	// (StateServer is set), there must be at least one state server address supplied.
 	// The entity name must match that of the machine being started,
 	// or be empty when starting a state server.
-	MongoInfo *authentication.MongoInfo
+	MongoInfo *mongo.MongoInfo
 
 	// APIInfo holds the means for the new instance to communicate with the
 	// juju state API. Unless the new machine is running a state server (StateServer is
@@ -125,17 +126,8 @@ type MachineConfig struct {
 	// that it shouldn't verify SSL certificates
 	DisableSSLHostnameVerification bool
 
-	// SystemPrivateSSHKey is created at bootstrap time and recorded on every
-	// node that has an API server. At this stage, that is any machine where
-	// StateServer (member above) is set to true.
-	SystemPrivateSSHKey string
-
 	// Series represents the machine series.
 	Series string
-
-	// DisablePackageCommands is a flag that specifies whether to suppress
-	// the addition of package management commands.
-	DisablePackageCommands bool
 
 	// MachineAgentServiceName is the Upstart service name for the Juju machine agent.
 	MachineAgentServiceName string
@@ -154,6 +146,20 @@ type MachineConfig struct {
 
 	// The type of Simple Stream to download and deploy on this machine.
 	ImageStream string
+
+	// CustomImageMetadata is optional custom simplestreams image metadata
+	// to store in environment storage at bootstrap time. This is ignored
+	// in non-bootstrap machines.
+	CustomImageMetadata []*imagemetadata.ImageMetadata
+
+	// EnableOSRefreshUpdate specifies whether Juju will refresh its
+	// respective OS's updates list.
+	EnableOSRefreshUpdate bool
+
+	// EnableOSUpgrade defines Juju's behavior when provisioning
+	// machines. If enabled, the OS will perform any upgrades
+	// available as part of its provisioning.
+	EnableOSUpgrade bool
 }
 
 func base64yaml(m *config.Config) string {
@@ -173,19 +179,33 @@ const NonceFile = "nonce.txt"
 // AddAptCommands update the cloudinit.Config instance with the necessary
 // packages, the request to do the apt-get update/upgrade on boot, and adds
 // the apt proxy settings if there are any.
-func AddAptCommands(proxySettings proxy.Settings, c *cloudinit.Config) {
+func AddAptCommands(
+	proxySettings proxy.Settings,
+	c *cloudinit.Config,
+	addUpdateScripts bool,
+	addUpgradeScripts bool,
+) {
+	// Check preconditions
+	if c == nil {
+		panic("c is nil")
+	}
+
 	// Bring packages up-to-date.
-	c.SetAptUpdate(true)
-	c.SetAptUpgrade(true)
+	c.SetAptUpdate(addUpdateScripts)
+	c.SetAptUpgrade(addUpgradeScripts)
 	c.SetAptGetWrapper("eatmydata")
 
-	c.AddPackage("curl")
-	c.AddPackage("cpu-checker")
-	// TODO(axw) 2014-07-02 #1277359
-	// Don't install bridge-utils in cloud-init;
-	// leave it to the networker worker.
-	c.AddPackage("bridge-utils")
-	c.AddPackage("rsyslog-gnutls")
+	// If we're not doing an update, adding these packages is
+	// meaningless.
+	if addUpdateScripts {
+		c.AddPackage("curl")
+		c.AddPackage("cpu-checker")
+		// TODO(axw) 2014-07-02 #1277359
+		// Don't install bridge-utils in cloud-init;
+		// leave it to the networker worker.
+		c.AddPackage("bridge-utils")
+		c.AddPackage("rsyslog-gnutls")
+	}
 
 	// Write out the apt proxy settings
 	if (proxySettings != proxy.Settings{}) {
@@ -425,9 +445,6 @@ func verifyConfig(cfg *MachineConfig) (err error) {
 		}
 		if cfg.StateServingInfo.APIPort == 0 {
 			return fmt.Errorf("missing API port")
-		}
-		if cfg.SystemPrivateSSHKey == "" {
-			return fmt.Errorf("missing system ssh identity")
 		}
 		if cfg.InstanceId == "" {
 			return fmt.Errorf("missing instance-id")

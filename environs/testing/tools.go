@@ -11,11 +11,10 @@ import (
 
 	"github.com/juju/utils"
 	"github.com/juju/utils/set"
-	gc "launchpad.net/gocheck"
+	gc "gopkg.in/check.v1"
 
 	agenttools "github.com/juju/juju/agent/tools"
-	"github.com/juju/juju/environs"
-	"github.com/juju/juju/environs/bootstrap"
+	"github.com/juju/juju/environs/filestorage"
 	"github.com/juju/juju/environs/simplestreams"
 	"github.com/juju/juju/environs/storage"
 	envtools "github.com/juju/juju/environs/tools"
@@ -25,6 +24,9 @@ import (
 	"github.com/juju/juju/version"
 	"github.com/juju/juju/worker/upgrader"
 )
+
+// toolsLtsSeries records the known Ubuntu LTS series.
+var toolsLtsSeries = []string{"precise", "trusty"}
 
 // ToolsFixture is used as a fixture to stub out the default tools URL so we
 // don't hit the real internet during tests.
@@ -47,6 +49,14 @@ func (s *ToolsFixture) TearDownTest(c *gc.C) {
 	envtools.DefaultBaseURL = s.origDefaultURL
 }
 
+// UploadFakeToolsToDirectory uploads fake tools of the architectures in
+// s.UploadArches for each LTS release to the specified directory.
+func (s *ToolsFixture) UploadFakeToolsToDirectory(c *gc.C, dir string) {
+	stor, err := filestorage.NewFileStorageWriter(dir)
+	c.Assert(err, gc.IsNil)
+	s.UploadFakeTools(c, stor)
+}
+
 // UploadFakeTools uploads fake tools of the architectures in
 // s.UploadArches for each LTS release to the specified storage.
 func (s *ToolsFixture) UploadFakeTools(c *gc.C, stor storage.Storage) {
@@ -58,7 +68,7 @@ func (s *ToolsFixture) UploadFakeTools(c *gc.C, stor storage.Storage) {
 	for _, arch := range arches {
 		v := version.Current
 		v.Arch = arch
-		for _, series := range bootstrap.ToolsLtsSeries {
+		for _, series := range toolsLtsSeries {
 			v.Series = series
 			versions = append(versions, v)
 		}
@@ -69,7 +79,7 @@ func (s *ToolsFixture) UploadFakeTools(c *gc.C, stor storage.Storage) {
 
 // RemoveFakeToolsMetadata deletes the fake simplestreams tools metadata from the supplied storage.
 func RemoveFakeToolsMetadata(c *gc.C, stor storage.Storage) {
-	files := []string{simplestreams.UnsignedIndex, envtools.ProductMetadataPath}
+	files := []string{simplestreams.UnsignedIndex("v1"), envtools.ProductMetadataPath("released")}
 	for _, file := range files {
 		toolspath := path.Join("tools", file)
 		err := stor.Remove(toolspath)
@@ -171,7 +181,7 @@ func UploadFakeToolsVersions(stor storage.Storage, versions ...version.Binary) (
 			agentTools[i] = t
 		}
 	}
-	if err := envtools.MergeAndWriteMetadata(stor, agentTools, envtools.DoNotWriteMirrors); err != nil {
+	if err := envtools.MergeAndWriteMetadata(stor, "released", agentTools, envtools.DoNotWriteMirrors); err != nil {
 		return nil, err
 	}
 	return agentTools, nil
@@ -181,7 +191,7 @@ func UploadFakeToolsVersions(stor storage.Storage, versions ...version.Binary) (
 func AssertUploadFakeToolsVersions(c *gc.C, stor storage.Storage, versions ...version.Binary) []*coretools.Tools {
 	agentTools, err := UploadFakeToolsVersions(stor, versions...)
 	c.Assert(err, gc.IsNil)
-	err = envtools.MergeAndWriteMetadata(stor, agentTools, envtools.DoNotWriteMirrors)
+	err = envtools.MergeAndWriteMetadata(stor, "released", agentTools, envtools.DoNotWriteMirrors)
 	c.Assert(err, gc.IsNil)
 	return agentTools
 }
@@ -196,7 +206,7 @@ func MustUploadFakeToolsVersions(stor storage.Storage, versions ...version.Binar
 		}
 		agentTools[i] = t
 	}
-	err := envtools.MergeAndWriteMetadata(stor, agentTools, envtools.DoNotWriteMirrors)
+	err := envtools.MergeAndWriteMetadata(stor, "released", agentTools, envtools.DoNotWriteMirrors)
 	if err != nil {
 		panic(err)
 	}
@@ -204,7 +214,7 @@ func MustUploadFakeToolsVersions(stor storage.Storage, versions ...version.Binar
 }
 
 func uploadFakeTools(stor storage.Storage) error {
-	toolsSeries := set.NewStrings(bootstrap.ToolsLtsSeries...)
+	toolsSeries := set.NewStrings(toolsLtsSeries...)
 	toolsSeries.Add(version.Current.Series)
 	var versions []version.Binary
 	for _, series := range toolsSeries.Values() {
@@ -263,12 +273,6 @@ func RemoveTools(c *gc.C, stor storage.Storage) {
 	RemoveFakeToolsMetadata(c, stor)
 }
 
-// RemoveAllTools deletes all tools from the supplied environment.
-func RemoveAllTools(c *gc.C, env environs.Environ) {
-	c.Logf("clearing private storage")
-	RemoveTools(c, env.Storage())
-}
-
 var (
 	V100    = version.MustParse("1.0.0")
 	V100p64 = version.MustParseBinary("1.0.0-precise-amd64")
@@ -305,7 +309,12 @@ var (
 	V120q64 = version.MustParseBinary("1.2.0-quantal-amd64")
 	V120q32 = version.MustParseBinary("1.2.0-quantal-i386")
 	V120q   = []version.Binary{V120q64, V120q32}
-	V120all = append(V120p, V120q...)
+
+	V120t64 = version.MustParseBinary("1.2.0-trusty-amd64")
+	V120t32 = version.MustParseBinary("1.2.0-trusty-i386")
+	V120t   = []version.Binary{V120t64, V120t32}
+
+	V120all = append(append(V120p, V120q...), V120t...)
 	V1all   = append(V100Xall, append(V110all, V120all...)...)
 
 	V220    = version.MustParse("2.2.0")

@@ -11,15 +11,15 @@ import (
 	"github.com/juju/loggo"
 	jc "github.com/juju/testing/checkers"
 	"github.com/juju/txn"
+	gc "gopkg.in/check.v1"
+	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
-	gc "launchpad.net/gocheck"
 
 	"github.com/juju/juju/constraints"
 	"github.com/juju/juju/environs/config"
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/network"
 	"github.com/juju/juju/state"
-	"github.com/juju/juju/state/api/params"
 	"github.com/juju/juju/state/testing"
 	coretesting "github.com/juju/juju/testing"
 	"github.com/juju/juju/version"
@@ -48,21 +48,118 @@ func (s *MachineSuite) SetUpTest(c *gc.C) {
 	c.Assert(err, gc.IsNil)
 }
 
+func (s *MachineSuite) TestSetRebootFlagDeadMachine(c *gc.C) {
+	err := s.machine.EnsureDead()
+	c.Assert(err, gc.IsNil)
+
+	err = s.machine.SetRebootFlag(true)
+	c.Assert(err, gc.Equals, mgo.ErrNotFound)
+
+	rFlag, err := s.machine.GetRebootFlag()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rFlag, jc.IsFalse)
+
+	err = s.machine.SetRebootFlag(false)
+	c.Assert(err, gc.IsNil)
+
+	action, err := s.machine.ShouldRebootOrShutdown()
+	c.Assert(err, gc.IsNil)
+	c.Assert(action, gc.Equals, state.ShouldDoNothing)
+}
+
+func (s *MachineSuite) TestSetRebootFlagDeadMachineRace(c *gc.C) {
+	setFlag := txn.TestHook{
+		Before: func() {
+			err := s.machine.EnsureDead()
+			c.Assert(err, gc.IsNil)
+		},
+	}
+	defer state.SetTestHooks(c, s.State, setFlag).Check()
+
+	err := s.machine.SetRebootFlag(true)
+	c.Assert(err, gc.Equals, mgo.ErrNotFound)
+}
+
+func (s *MachineSuite) TestSetRebootFlag(c *gc.C) {
+	err := s.machine.SetRebootFlag(true)
+	c.Assert(err, gc.IsNil)
+
+	rebootFlag, err := s.machine.GetRebootFlag()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rebootFlag, jc.IsTrue)
+}
+
+func (s *MachineSuite) TestSetUnsetRebootFlag(c *gc.C) {
+	err := s.machine.SetRebootFlag(true)
+	c.Assert(err, gc.IsNil)
+
+	rebootFlag, err := s.machine.GetRebootFlag()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rebootFlag, jc.IsTrue)
+
+	err = s.machine.SetRebootFlag(false)
+	c.Assert(err, gc.IsNil)
+
+	rebootFlag, err = s.machine.GetRebootFlag()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rebootFlag, jc.IsFalse)
+}
+
+func (s *MachineSuite) TestShouldShutdownOrReboot(c *gc.C) {
+	// Add first container.
+	c1, err := s.State.AddMachineInsideMachine(state.MachineTemplate{
+		Series: "quantal",
+		Jobs:   []state.MachineJob{state.JobHostUnits},
+	}, s.machine.Id(), instance.LXC)
+	c.Assert(err, gc.IsNil)
+
+	// Add second container.
+	c2, err := s.State.AddMachineInsideMachine(state.MachineTemplate{
+		Series: "quantal",
+		Jobs:   []state.MachineJob{state.JobHostUnits},
+	}, c1.Id(), instance.LXC)
+	c.Assert(err, gc.IsNil)
+
+	err = c2.SetRebootFlag(true)
+	c.Assert(err, gc.IsNil)
+
+	rAction, err := s.machine.ShouldRebootOrShutdown()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rAction, gc.Equals, state.ShouldDoNothing)
+
+	rAction, err = c1.ShouldRebootOrShutdown()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rAction, gc.Equals, state.ShouldDoNothing)
+
+	rAction, err = c2.ShouldRebootOrShutdown()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rAction, gc.Equals, state.ShouldReboot)
+
+	// // Reboot happens on the root node
+	err = c2.SetRebootFlag(false)
+	c.Assert(err, gc.IsNil)
+
+	err = s.machine.SetRebootFlag(true)
+	c.Assert(err, gc.IsNil)
+
+	rAction, err = s.machine.ShouldRebootOrShutdown()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rAction, gc.Equals, state.ShouldReboot)
+
+	rAction, err = c1.ShouldRebootOrShutdown()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rAction, gc.Equals, state.ShouldShutdown)
+
+	rAction, err = c2.ShouldRebootOrShutdown()
+	c.Assert(err, gc.IsNil)
+	c.Assert(rAction, gc.Equals, state.ShouldShutdown)
+}
+
 func (s *MachineSuite) TestContainerDefaults(c *gc.C) {
 	c.Assert(string(s.machine.ContainerType()), gc.Equals, "")
 	containers, err := s.machine.Containers()
 	c.Assert(err, gc.IsNil)
 	c.Assert(containers, gc.DeepEquals, []string(nil))
-}
-
-func (s *MachineSuite) TestMachineJobFromParams(c *gc.C) {
-	for stateMachineJob, paramsMachineJob := range state.JobNames {
-		job, err := state.MachineJobFromParams(paramsMachineJob)
-		c.Assert(err, gc.IsNil)
-		c.Assert(job, gc.Equals, stateMachineJob)
-	}
-	_, err := state.MachineJobFromParams("invalid")
-	c.Assert(err, gc.NotNil)
 }
 
 func (s *MachineSuite) TestParentId(c *gc.C) {
@@ -194,7 +291,7 @@ func (s *MachineSuite) TestDestroyRemovePorts(c *gc.C) {
 	c.Assert(err, gc.IsNil)
 	err = unit.OpenPort("tcp", 8080)
 	c.Assert(err, gc.IsNil)
-	ports, err := state.GetPorts(s.State, s.machine.Id())
+	ports, err := state.GetPorts(s.State, s.machine.Id(), network.DefaultPublic)
 	c.Assert(ports, gc.NotNil)
 	c.Assert(err, gc.IsNil)
 	err = unit.UnassignFromMachine()
@@ -206,7 +303,7 @@ func (s *MachineSuite) TestDestroyRemovePorts(c *gc.C) {
 	err = s.machine.Remove()
 	c.Assert(err, gc.IsNil)
 	// once the machine is destroyed, there should be no ports documents present for it
-	ports, err = state.GetPorts(s.State, s.machine.Id())
+	ports, err = state.GetPorts(s.State, s.machine.Id(), network.DefaultPublic)
 	c.Assert(ports, gc.IsNil)
 	c.Assert(err, jc.Satisfies, errors.IsNotFound)
 }
@@ -794,7 +891,7 @@ func (s *MachineSuite) TestMachineSetInstanceInfoSuccess(c *gc.C) {
 	c.Check(ifaces[0].InterfaceName(), gc.Equals, interfaces[0].InterfaceName)
 	c.Check(ifaces[0].NetworkName(), gc.Equals, interfaces[0].NetworkName)
 	c.Check(ifaces[0].MACAddress(), gc.Equals, interfaces[0].MACAddress)
-	c.Check(ifaces[0].MachineTag(), gc.Equals, s.machine.Tag().String())
+	c.Check(ifaces[0].MachineTag(), gc.Equals, s.machine.Tag())
 	c.Check(ifaces[0].IsVirtual(), gc.Equals, interfaces[0].IsVirtual)
 }
 
@@ -911,7 +1008,7 @@ func (s *MachineSuite) TestMachinePrincipalUnits(c *gc.C) {
 		}
 	}
 	// Add the logging units subordinate to the s2 units.
-	eps, err := s.State.InferEndpoints([]string{"s2", "s3"})
+	eps, err := s.State.InferEndpoints("s2", "s3")
 	c.Assert(err, gc.IsNil)
 	rel, err := s.State.AddRelation(eps...)
 	c.Assert(err, gc.IsNil)
@@ -1049,6 +1146,9 @@ func (s *MachineSuite) TestWatchDiesOnStateClose(c *gc.C) {
 }
 
 func (s *MachineSuite) TestWatchPrincipalUnits(c *gc.C) {
+	// TODO(mjs) - ENVUUID - test with multiple environments with
+	// identically named units and ensure there's no leakage.
+
 	// Start a watch on an empty machine; check no units reported.
 	w := s.machine.WatchPrincipalUnits()
 	defer testing.AssertStop(c, w)
@@ -1074,7 +1174,7 @@ func (s *MachineSuite) TestWatchPrincipalUnits(c *gc.C) {
 	wc.AssertNoChange()
 
 	// Change the unit; no change.
-	err = mysql0.SetStatus(params.StatusStarted, "", nil)
+	err = mysql0.SetStatus(state.StatusStarted, "", nil)
 	c.Assert(err, gc.IsNil)
 	wc.AssertNoChange()
 
@@ -1089,8 +1189,8 @@ func (s *MachineSuite) TestWatchPrincipalUnits(c *gc.C) {
 	wc.AssertNoChange()
 
 	// Add a subordinate to the Alive unit; no change.
-	logging := s.AddTestingService(c, "logging", s.AddTestingCharm(c, "logging"))
-	eps, err := s.State.InferEndpoints([]string{"mysql", "logging"})
+	s.AddTestingService(c, "logging", s.AddTestingCharm(c, "logging"))
+	eps, err := s.State.InferEndpoints("mysql", "logging")
 	c.Assert(err, gc.IsNil)
 	rel, err := s.State.AddRelation(eps...)
 	c.Assert(err, gc.IsNil)
@@ -1098,12 +1198,12 @@ func (s *MachineSuite) TestWatchPrincipalUnits(c *gc.C) {
 	c.Assert(err, gc.IsNil)
 	err = mysqlru1.EnterScope(nil)
 	c.Assert(err, gc.IsNil)
-	logging0, err := logging.Unit("logging/0")
+	logging0, err := s.State.Unit("logging/0")
 	c.Assert(err, gc.IsNil)
 	wc.AssertNoChange()
 
 	// Change the subordinate; no change.
-	err = logging0.SetStatus(params.StatusStarted, "", nil)
+	err = logging0.SetStatus(state.StatusStarted, "", nil)
 	c.Assert(err, gc.IsNil)
 	wc.AssertNoChange()
 
@@ -1178,7 +1278,7 @@ func (s *MachineSuite) TestWatchUnits(c *gc.C) {
 	wc.AssertNoChange()
 
 	// Change the unit; no change.
-	err = mysql0.SetStatus(params.StatusStarted, "", nil)
+	err = mysql0.SetStatus(state.StatusStarted, "", nil)
 	c.Assert(err, gc.IsNil)
 	wc.AssertNoChange()
 
@@ -1193,8 +1293,8 @@ func (s *MachineSuite) TestWatchUnits(c *gc.C) {
 	wc.AssertNoChange()
 
 	// Add a subordinate to the Alive unit; change detected.
-	logging := s.AddTestingService(c, "logging", s.AddTestingCharm(c, "logging"))
-	eps, err := s.State.InferEndpoints([]string{"mysql", "logging"})
+	s.AddTestingService(c, "logging", s.AddTestingCharm(c, "logging"))
+	eps, err := s.State.InferEndpoints("mysql", "logging")
 	c.Assert(err, gc.IsNil)
 	rel, err := s.State.AddRelation(eps...)
 	c.Assert(err, gc.IsNil)
@@ -1202,13 +1302,13 @@ func (s *MachineSuite) TestWatchUnits(c *gc.C) {
 	c.Assert(err, gc.IsNil)
 	err = mysqlru1.EnterScope(nil)
 	c.Assert(err, gc.IsNil)
-	logging0, err := logging.Unit("logging/0")
+	logging0, err := s.State.Unit("logging/0")
 	c.Assert(err, gc.IsNil)
 	wc.AssertChange("logging/0")
 	wc.AssertNoChange()
 
 	// Change the subordinate; no change.
-	err = logging0.SetStatus(params.StatusStarted, "", nil)
+	err = logging0.SetStatus(state.StatusStarted, "", nil)
 	c.Assert(err, gc.IsNil)
 	wc.AssertNoChange()
 
@@ -1378,47 +1478,47 @@ func (s *MachineSuite) TestConstraintsLifecycle(c *gc.C) {
 }
 
 func (s *MachineSuite) TestGetSetStatusWhileAlive(c *gc.C) {
-	err := s.machine.SetStatus(params.StatusError, "", nil)
+	err := s.machine.SetStatus(state.StatusError, "", nil)
 	c.Assert(err, gc.ErrorMatches, `cannot set status "error" without info`)
-	err = s.machine.SetStatus(params.StatusDown, "", nil)
+	err = s.machine.SetStatus(state.StatusDown, "", nil)
 	c.Assert(err, gc.ErrorMatches, `cannot set status "down"`)
-	err = s.machine.SetStatus(params.Status("vliegkat"), "orville", nil)
+	err = s.machine.SetStatus(state.Status("vliegkat"), "orville", nil)
 	c.Assert(err, gc.ErrorMatches, `cannot set invalid status "vliegkat"`)
 
 	status, info, data, err := s.machine.Status()
 	c.Assert(err, gc.IsNil)
-	c.Assert(status, gc.Equals, params.StatusPending)
+	c.Assert(status, gc.Equals, state.StatusPending)
 	c.Assert(info, gc.Equals, "")
 	c.Assert(data, gc.HasLen, 0)
 
-	err = s.machine.SetStatus(params.StatusStarted, "", nil)
+	err = s.machine.SetStatus(state.StatusStarted, "", nil)
 	c.Assert(err, gc.IsNil)
 	status, info, data, err = s.machine.Status()
 	c.Assert(err, gc.IsNil)
-	c.Assert(status, gc.Equals, params.StatusStarted)
+	c.Assert(status, gc.Equals, state.StatusStarted)
 	c.Assert(info, gc.Equals, "")
 	c.Assert(data, gc.HasLen, 0)
 
-	err = s.machine.SetStatus(params.StatusError, "provisioning failed", params.StatusData{
+	err = s.machine.SetStatus(state.StatusError, "provisioning failed", map[string]interface{}{
 		"foo": "bar",
 	})
 	c.Assert(err, gc.IsNil)
 	status, info, data, err = s.machine.Status()
 	c.Assert(err, gc.IsNil)
-	c.Assert(status, gc.Equals, params.StatusError)
+	c.Assert(status, gc.Equals, state.StatusError)
 	c.Assert(info, gc.Equals, "provisioning failed")
-	c.Assert(data, gc.DeepEquals, params.StatusData{
+	c.Assert(data, gc.DeepEquals, map[string]interface{}{
 		"foo": "bar",
 	})
 }
 
 func (s *MachineSuite) TestSetStatusPending(c *gc.C) {
-	err := s.machine.SetStatus(params.StatusPending, "", nil)
+	err := s.machine.SetStatus(state.StatusPending, "", nil)
 	c.Assert(err, gc.IsNil)
 	// Cannot set status to pending once a machine is provisioned.
 	err = s.machine.SetProvisioned("umbrella/0", "fake_nonce", nil)
 	c.Assert(err, gc.IsNil)
-	err = s.machine.SetStatus(params.StatusPending, "", nil)
+	err = s.machine.SetStatus(state.StatusPending, "", nil)
 	c.Assert(err, gc.ErrorMatches, `cannot set status "pending"`)
 }
 
@@ -1426,41 +1526,41 @@ func (s *MachineSuite) TestGetSetStatusWhileNotAlive(c *gc.C) {
 	// When Dying set/get should work.
 	err := s.machine.Destroy()
 	c.Assert(err, gc.IsNil)
-	err = s.machine.SetStatus(params.StatusStopped, "", nil)
+	err = s.machine.SetStatus(state.StatusStopped, "", nil)
 	c.Assert(err, gc.IsNil)
 	status, info, data, err := s.machine.Status()
 	c.Assert(err, gc.IsNil)
-	c.Assert(status, gc.Equals, params.StatusStopped)
+	c.Assert(status, gc.Equals, state.StatusStopped)
 	c.Assert(info, gc.Equals, "")
 	c.Assert(data, gc.HasLen, 0)
 
 	// When Dead set should fail, but get will work.
 	err = s.machine.EnsureDead()
 	c.Assert(err, gc.IsNil)
-	err = s.machine.SetStatus(params.StatusStarted, "not really", nil)
+	err = s.machine.SetStatus(state.StatusStarted, "not really", nil)
 	c.Assert(err, gc.ErrorMatches, `cannot set status of machine "1": not found or not alive`)
 	status, info, data, err = s.machine.Status()
 	c.Assert(err, gc.IsNil)
-	c.Assert(status, gc.Equals, params.StatusStopped)
+	c.Assert(status, gc.Equals, state.StatusStopped)
 	c.Assert(info, gc.Equals, "")
 	c.Assert(data, gc.HasLen, 0)
 
 	err = s.machine.Remove()
 	c.Assert(err, gc.IsNil)
-	err = s.machine.SetStatus(params.StatusStarted, "not really", nil)
+	err = s.machine.SetStatus(state.StatusStarted, "not really", nil)
 	c.Assert(err, gc.ErrorMatches, `cannot set status of machine "1": not found or not alive`)
 	_, _, _, err = s.machine.Status()
 	c.Assert(err, gc.ErrorMatches, "status not found")
 }
 
 func (s *MachineSuite) TestGetSetStatusDataStandard(c *gc.C) {
-	err := s.machine.SetStatus(params.StatusStarted, "", nil)
+	err := s.machine.SetStatus(state.StatusStarted, "", nil)
 	c.Assert(err, gc.IsNil)
 	_, _, _, err = s.machine.Status()
 	c.Assert(err, gc.IsNil)
 
 	// Regular status setting with data.
-	err = s.machine.SetStatus(params.StatusError, "provisioning failed", params.StatusData{
+	err = s.machine.SetStatus(state.StatusError, "provisioning failed", map[string]interface{}{
 		"1st-key": "one",
 		"2nd-key": 2,
 		"3rd-key": true,
@@ -1468,9 +1568,9 @@ func (s *MachineSuite) TestGetSetStatusDataStandard(c *gc.C) {
 	c.Assert(err, gc.IsNil)
 	status, info, data, err := s.machine.Status()
 	c.Assert(err, gc.IsNil)
-	c.Assert(status, gc.Equals, params.StatusError)
+	c.Assert(status, gc.Equals, state.StatusError)
 	c.Assert(info, gc.Equals, "provisioning failed")
-	c.Assert(data, gc.DeepEquals, params.StatusData{
+	c.Assert(data, gc.DeepEquals, map[string]interface{}{
 		"1st-key": "one",
 		"2nd-key": 2,
 		"3rd-key": true,
@@ -1478,13 +1578,13 @@ func (s *MachineSuite) TestGetSetStatusDataStandard(c *gc.C) {
 }
 
 func (s *MachineSuite) TestGetSetStatusDataMongo(c *gc.C) {
-	err := s.machine.SetStatus(params.StatusStarted, "", nil)
+	err := s.machine.SetStatus(state.StatusStarted, "", nil)
 	c.Assert(err, gc.IsNil)
 	_, _, _, err = s.machine.Status()
 	c.Assert(err, gc.IsNil)
 
 	// Status setting with MongoDB special values.
-	err = s.machine.SetStatus(params.StatusError, "mongo", params.StatusData{
+	err = s.machine.SetStatus(state.StatusError, "mongo", map[string]interface{}{
 		`{name: "Joe"}`: "$where",
 		"eval":          `eval(function(foo) { return foo; }, "bar")`,
 		"mapReduce":     "mapReduce",
@@ -1493,9 +1593,9 @@ func (s *MachineSuite) TestGetSetStatusDataMongo(c *gc.C) {
 	c.Assert(err, gc.IsNil)
 	status, info, data, err := s.machine.Status()
 	c.Assert(err, gc.IsNil)
-	c.Assert(status, gc.Equals, params.StatusError)
+	c.Assert(status, gc.Equals, state.StatusError)
 	c.Assert(info, gc.Equals, "mongo")
-	c.Assert(data, gc.DeepEquals, params.StatusData{
+	c.Assert(data, gc.DeepEquals, map[string]interface{}{
 		`{name: "Joe"}`: "$where",
 		"eval":          `eval(function(foo) { return foo; }, "bar")`,
 		"mapReduce":     "mapReduce",
@@ -1504,38 +1604,38 @@ func (s *MachineSuite) TestGetSetStatusDataMongo(c *gc.C) {
 }
 
 func (s *MachineSuite) TestGetSetStatusDataChange(c *gc.C) {
-	err := s.machine.SetStatus(params.StatusStarted, "", nil)
+	err := s.machine.SetStatus(state.StatusStarted, "", nil)
 	c.Assert(err, gc.IsNil)
 	_, _, _, err = s.machine.Status()
 	c.Assert(err, gc.IsNil)
 
 	// Status setting and changing data afterwards.
-	data := params.StatusData{
+	data := map[string]interface{}{
 		"1st-key": "one",
 		"2nd-key": 2,
 		"3rd-key": true,
 	}
-	err = s.machine.SetStatus(params.StatusError, "provisioning failed", data)
+	err = s.machine.SetStatus(state.StatusError, "provisioning failed", data)
 	c.Assert(err, gc.IsNil)
 	data["4th-key"] = 4.0
 
 	status, info, data, err := s.machine.Status()
 	c.Assert(err, gc.IsNil)
-	c.Assert(status, gc.Equals, params.StatusError)
+	c.Assert(status, gc.Equals, state.StatusError)
 	c.Assert(info, gc.Equals, "provisioning failed")
-	c.Assert(data, gc.DeepEquals, params.StatusData{
+	c.Assert(data, gc.DeepEquals, map[string]interface{}{
 		"1st-key": "one",
 		"2nd-key": 2,
 		"3rd-key": true,
 	})
 
 	// Set status data to nil, so an empty map will be returned.
-	err = s.machine.SetStatus(params.StatusStarted, "", nil)
+	err = s.machine.SetStatus(state.StatusStarted, "", nil)
 	c.Assert(err, gc.IsNil)
 
 	status, info, data, err = s.machine.Status()
 	c.Assert(err, gc.IsNil)
-	c.Assert(status, gc.Equals, params.StatusStarted)
+	c.Assert(status, gc.Equals, state.StatusStarted)
 	c.Assert(info, gc.Equals, "")
 	c.Assert(data, gc.HasLen, 0)
 }
@@ -1809,16 +1909,16 @@ func (s *MachineSuite) TestSetSupportedContainersSetsUnknownToError(c *gc.C) {
 	c.Assert(err, gc.IsNil)
 	status, info, data, err := supportedContainer.Status()
 	c.Assert(err, gc.IsNil)
-	c.Assert(status, gc.Equals, params.StatusPending)
+	c.Assert(status, gc.Equals, state.StatusPending)
 
 	// An unsupported (lxc) container will have an error status.
 	err = container.Refresh()
 	c.Assert(err, gc.IsNil)
 	status, info, data, err = container.Status()
 	c.Assert(err, gc.IsNil)
-	c.Assert(status, gc.Equals, params.StatusError)
+	c.Assert(status, gc.Equals, state.StatusError)
 	c.Assert(info, gc.Equals, "unsupported container")
-	c.Assert(data, gc.DeepEquals, params.StatusData{"type": "lxc"})
+	c.Assert(data, gc.DeepEquals, map[string]interface{}{"type": "lxc"})
 }
 
 func (s *MachineSuite) TestSupportsNoContainersSetsAllToError(c *gc.C) {
@@ -1844,10 +1944,10 @@ func (s *MachineSuite) TestSupportsNoContainersSetsAllToError(c *gc.C) {
 		c.Assert(err, gc.IsNil)
 		status, info, data, err := container.Status()
 		c.Assert(err, gc.IsNil)
-		c.Assert(status, gc.Equals, params.StatusError)
+		c.Assert(status, gc.Equals, state.StatusError)
 		c.Assert(info, gc.Equals, "unsupported container")
 		containerType := state.ContainerTypeFromId(container.Id())
-		c.Assert(data, gc.DeepEquals, params.StatusData{"type": string(containerType)})
+		c.Assert(data, gc.DeepEquals, map[string]interface{}{"type": string(containerType)})
 	}
 }
 
@@ -1896,34 +1996,34 @@ func (s *MachineSuite) TestWatchInterfaces(c *gc.C) {
 	wc.AssertOneChange()
 
 	// Disable the first interface.
-	err = ifaces[0].SetDisabled(true)
+	err = ifaces[0].Disable()
 	c.Assert(err, gc.IsNil)
 	wc.AssertOneChange()
 
 	// Disable the first interface again, should not report.
-	err = ifaces[0].SetDisabled(true)
+	err = ifaces[0].Disable()
 	c.Assert(err, gc.IsNil)
 	wc.AssertNoChange()
 
 	// Enable the second interface, should report, because it was initially disabled.
-	err = ifaces[1].SetDisabled(false)
+	err = ifaces[1].Enable()
 	c.Assert(err, gc.IsNil)
 	wc.AssertOneChange()
 
 	// Disable two interfaces at once, check that both are reported.
-	err = ifaces[1].SetDisabled(true)
+	err = ifaces[1].Disable()
 	c.Assert(err, gc.IsNil)
-	err = ifaces[2].SetDisabled(true)
+	err = ifaces[2].Disable()
 	c.Assert(err, gc.IsNil)
 	wc.AssertOneChange()
 
 	// Enable the first interface.
-	err = ifaces[0].SetDisabled(false)
+	err = ifaces[0].Enable()
 	c.Assert(err, gc.IsNil)
 	wc.AssertOneChange()
 
 	// Enable the first interface again, should not report.
-	err = ifaces[0].SetDisabled(false)
+	err = ifaces[0].Enable()
 	c.Assert(err, gc.IsNil)
 	wc.AssertNoChange()
 
@@ -1969,7 +2069,7 @@ func (s *MachineSuite) TestWatchInterfaces(c *gc.C) {
 	c.Assert(ifaces2, gc.HasLen, 3)
 
 	// Disable the first interface on the second machine, should not report.
-	err = ifaces2[0].SetDisabled(true)
+	err = ifaces2[0].Disable()
 	c.Assert(err, gc.IsNil)
 	wc.AssertNoChange()
 
@@ -1991,4 +2091,10 @@ func (s *MachineSuite) TestWatchInterfacesDiesOnStateClose(c *gc.C) {
 		<-w.Changes()
 		return w
 	})
+}
+
+func (s *MachineSuite) TestMachineAgentTools(c *gc.C) {
+	m, err := s.State.AddMachine("quantal", state.JobHostUnits)
+	c.Assert(err, gc.IsNil)
+	testAgentTools(c, m, "machine "+m.Id())
 }

@@ -12,12 +12,12 @@ import (
 	"launchpad.net/tomb"
 
 	"github.com/juju/juju/agent"
+	apiprovisioner "github.com/juju/juju/api/provisioner"
+	apiwatcher "github.com/juju/juju/api/watcher"
 	"github.com/juju/juju/environmentserver/authentication"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/config"
 	"github.com/juju/juju/instance"
-	apiprovisioner "github.com/juju/juju/state/api/provisioner"
-	apiwatcher "github.com/juju/juju/state/api/watcher"
 	"github.com/juju/juju/state/watcher"
 	"github.com/juju/juju/worker"
 )
@@ -100,8 +100,14 @@ func (p *provisioner) Stop() error {
 	return p.tomb.Wait()
 }
 
+// getToolsFinder returns a ToolsFinder for the provided State.
+// This exists for mocking.
+var getToolsFinder = func(st *apiprovisioner.State) ToolsFinder {
+	return st
+}
+
 // getStartTask creates a new worker for the provisioner,
-func (p *provisioner) getStartTask(safeMode bool) (ProvisionerTask, error) {
+func (p *provisioner) getStartTask(harvestMode config.HarvestMode) (ProvisionerTask, error) {
 	auth, err := authentication.NewAPIAuthenticator(p.st)
 	if err != nil {
 		return nil, err
@@ -129,8 +135,9 @@ func (p *provisioner) getStartTask(safeMode bool) (ProvisionerTask, error) {
 
 	task := NewProvisionerTask(
 		machineTag,
-		safeMode,
+		harvestMode,
 		p.st,
+		getToolsFinder(p.st),
 		machineWatcher,
 		retryWatcher,
 		p.broker,
@@ -174,8 +181,8 @@ func (p *environProvisioner) loop() error {
 	}
 	p.broker = p.environ
 
-	safeMode := p.environ.Config().ProvisionerSafeMode()
-	task, err := p.getStartTask(safeMode)
+	harvestMode := p.environ.Config().ProvisionerHarvestMode()
+	task, err := p.getStartTask(harvestMode)
 	if err != nil {
 		return err
 	}
@@ -191,7 +198,7 @@ func (p *environProvisioner) loop() error {
 			return err
 		case _, ok := <-environConfigChanges:
 			if !ok {
-				return watcher.MustErr(environWatcher)
+				return watcher.EnsureErr(environWatcher)
 			}
 			environConfig, err := p.st.EnvironConfig()
 			if err != nil {
@@ -201,7 +208,7 @@ func (p *environProvisioner) loop() error {
 			if err := p.setConfig(environConfig); err != nil {
 				logger.Errorf("loaded invalid environment configuration: %v", err)
 			}
-			task.SetSafeMode(environConfig.ProvisionerSafeMode())
+			task.SetHarvestMode(environConfig.ProvisionerHarvestMode())
 		}
 	}
 }
@@ -248,7 +255,7 @@ func NewContainerProvisioner(containerType instance.ContainerType, st *apiprovis
 }
 
 func (p *containerProvisioner) loop() error {
-	task, err := p.getStartTask(false)
+	task, err := p.getStartTask(config.HarvestDestroyed)
 	if err != nil {
 		return err
 	}

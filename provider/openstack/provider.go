@@ -24,6 +24,7 @@ import (
 	"launchpad.net/goose/nova"
 	"launchpad.net/goose/swift"
 
+	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/constraints"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/config"
@@ -48,6 +49,8 @@ var _ environs.EnvironProvider = (*environProvider)(nil)
 
 var providerInstance environProvider
 
+var makeServiceURL = client.AuthenticatingClient.MakeServiceURL
+
 // Use shortAttempt to poll for short-term events.
 // TODO: This was kept to a long timeout because Nova needs more time than EC2.
 // For example, HP Cloud takes around 9.1 seconds (10 samples) to return a
@@ -60,6 +63,8 @@ var shortAttempt = utils.AttemptStrategy{
 
 func init() {
 	environs.RegisterProvider("openstack", environProvider{})
+	environs.RegisterImageDataSourceFunc("keystone catalog", getKeystoneImageSource)
+	envtools.RegisterToolsDataSourceFunc("keystone catalog", getKeystoneToolsSource)
 }
 
 func (p environProvider) BoilerplateConfig() string {
@@ -98,11 +103,17 @@ openstack:
     #
     # image-metadata-url:  https://your-image-metadata-url
 
-    # image-stream chooses a simplestreams stream to select OS images
-    # from, for example daily or released images (or any other stream
+    # image-stream chooses a simplestreams stream from which to select
+    # OS images, for example daily or released images (or any other stream
     # available on simplestreams).
     #
     # image-stream: "released"
+
+    # tools-stream chooses a simplestreams stream from which to select tools,
+    # for example released or proposed tools (or any other stream available
+    # on simplestreams).
+    #
+    # tools-stream: "released"
 
     # auth-url defaults to the value of the environment variable
     # OS_AUTH_URL, but can be specified here.
@@ -140,6 +151,20 @@ openstack:
     # access-key: <secret>
     # secret-key: <secret>
 
+    # Whether or not to refresh the list of available updates for an
+    # OS. The default option of true is recommended for use in
+    # production systems, but disabling this can speed up local
+    # deployments for development or testing.
+    #
+    # enable-os-refresh-update: true
+
+    # Whether or not to perform OS upgrades when machines are
+    # provisioned. The default option of true is recommended for use
+    # in production systems, but disabling this can speed up local
+    # deployments for development or testing.
+    #
+    # enable-os-upgrade: true
+
 # https://juju.ubuntu.com/docs/config-hpcloud.html
 hpcloud:
     type: openstack
@@ -162,11 +187,17 @@ hpcloud:
     #
     # tenant-name: <your tenant name>
 
-    # image-stream chooses a simplestreams stream to select OS images
-    # from, for example daily or released images (or any other stream
+    # image-stream chooses a simplestreams stream from which to select
+    # OS images, for example daily or released images (or any other stream
     # available on simplestreams).
     #
     # image-stream: "released"
+
+    # tools-stream chooses a simplestreams stream from which to select tools,
+    # for example released or proposed tools (or any other stream available
+    # on simplestreams).
+    #
+    # tools-stream: "released"
 
     # auth-url holds the keystone url for authentication. It defaults
     # to the value of the environment variable OS_AUTH_URL.
@@ -196,6 +227,20 @@ hpcloud:
     # access-key: <secret>
     # secret-key: <secret>
 
+    # Whether or not to refresh the list of available updates for an
+    # OS. The default option of true is recommended for use in
+    # production systems, but disabling this can speed up local
+    # deployments for development or testing.
+    #
+    # enable-os-refresh-update: true
+
+    # Whether or not to perform OS upgrades when machines are
+    # provisioned. The default option of true is recommended for use
+    # in production systems, but disabling this can speed up local
+    # deployments for development or testing.
+    #
+    # enable-os-upgrade: true
+
 `[1:]
 }
 
@@ -223,7 +268,15 @@ func (p environProvider) Prepare(ctx environs.BootstrapContext, cfg *config.Conf
 	if err != nil {
 		return nil, err
 	}
-	return p.Open(cfg)
+	e, err := p.Open(cfg)
+	if err != nil {
+		return nil, err
+	}
+	// Verify credentials.
+	if err := authenticateClient(e.(*environ)); err != nil {
+		return nil, err
+	}
+	return e, nil
 }
 
 // MetadataLookupParams returns parameters which are used to query image metadata to
@@ -287,26 +340,24 @@ type environ struct {
 	supportedArchitectures []string
 
 	ecfgMutex       sync.Mutex
-	imageBaseMutex  sync.Mutex
-	toolsBaseMutex  sync.Mutex
 	ecfgUnlocked    *environConfig
 	client          client.AuthenticatingClient
 	novaUnlocked    *nova.Client
 	storageUnlocked storage.Storage
-	// An ordered list of sources in which to find the simplestreams index files used to
-	// look up image ids.
-	imageSources []simplestreams.DataSource
-	// An ordered list of paths in which to find the simplestreams index files used to
-	// look up tools ids.
-	toolsSources []simplestreams.DataSource
+
+	// keystoneImageDataSource caches the result of getKeystoneImageSource.
+	keystoneImageDataSourceMutex sync.Mutex
+	keystoneImageDataSource      simplestreams.DataSource
+
+	// keystoneToolsDataSource caches the result of getKeystoneToolsSource.
+	keystoneToolsDataSourceMutex sync.Mutex
+	keystoneToolsDataSource      simplestreams.DataSource
 
 	availabilityZonesMutex sync.Mutex
 	availabilityZones      []common.AvailabilityZone
 }
 
 var _ environs.Environ = (*environ)(nil)
-var _ imagemetadata.SupportsCustomSources = (*environ)(nil)
-var _ envtools.SupportsCustomSources = (*environ)(nil)
 var _ simplestreams.HasRegion = (*environ)(nil)
 var _ state.Prechecker = (*environ)(nil)
 var _ state.InstanceDistributor = (*environ)(nil)
@@ -399,6 +450,7 @@ func (inst *openstackInstance) Addresses() ([]network.Address, error) {
 	if inst.floatingIP != nil {
 		floatingIP = inst.floatingIP.IP
 	}
+	logger.Infof("instance %v has floating IP address: %v", inst.Id(), floatingIP)
 	return convertNovaAddresses(floatingIP, addresses), nil
 }
 
@@ -665,8 +717,7 @@ func (e *environ) Bootstrap(ctx environs.BootstrapContext, args environs.Bootstr
 	// The client's authentication may have been reset when finding tools if the agent-version
 	// attribute was updated so we need to re-authenticate. This will be a no-op if already authenticated.
 	// An authenticated client is needed for the URL() call below.
-	err := e.client.Authenticate()
-	if err != nil {
+	if err := authenticateClient(e); err != nil {
 		return "", "", nil, err
 	}
 	return common.Bootstrap(ctx, e, args)
@@ -707,6 +758,22 @@ func (e *environ) authClient(ecfg *environConfig, authModeCfg AuthMode) client.A
 	return newClient(cred, authMode, nil)
 }
 
+var authenticateClient = func(e *environ) error {
+	err := e.client.Authenticate()
+	if err != nil {
+		// Log the error in case there are any useful hints,
+		// but provide a readable and helpful error message
+		// to the user.
+		logger.Debugf("authentication failed: %v", err)
+		return jujuerrors.New(`authentication failed.
+
+Please ensure the credentials are correct. A common mistake is
+to specify the wrong tenant. Use the OpenStack "project" name
+for tenant-name in your environment configuration.`)
+	}
+	return nil
+}
+
 func (e *environ) SetConfig(cfg *config.Config) error {
 	ecfg, err := providerInstance.newConfig(cfg)
 	if err != nil {
@@ -721,6 +788,7 @@ func (e *environ) SetConfig(cfg *config.Config) error {
 	e.ecfgUnlocked = ecfg
 
 	e.client = e.authClient(ecfg, authModeCfg)
+
 	e.novaUnlocked = nova.New(e.client)
 
 	// create new control storage instance, existing instances continue
@@ -736,64 +804,48 @@ func (e *environ) SetConfig(cfg *config.Config) error {
 	return nil
 }
 
-// GetImageSources returns a list of sources which are used to search for simplestreams image metadata.
-func (e *environ) GetImageSources() ([]simplestreams.DataSource, error) {
-	e.imageBaseMutex.Lock()
-	defer e.imageBaseMutex.Unlock()
-
-	if e.imageSources != nil {
-		return e.imageSources, nil
+// getKeystoneImageSource is an imagemetadata.ImageDataSourceFunc that
+// returns a DataSource using the "product-streams" keystone URL.
+func getKeystoneImageSource(env environs.Environ) (simplestreams.DataSource, error) {
+	e, ok := env.(*environ)
+	if !ok {
+		return nil, jujuerrors.NotSupportedf("non-openstack environment")
 	}
-	if !e.client.IsAuthenticated() {
-		err := e.client.Authenticate()
-		if err != nil {
-			return nil, err
-		}
-	}
-	// Add the simplestreams source off the control bucket.
-	e.imageSources = append(e.imageSources, storage.NewStorageSimpleStreamsDataSource(
-		"cloud storage", e.Storage(), storage.BaseImagesPath))
-	// Add the simplestreams base URL from keystone if it is defined.
-	productStreamsURL, err := e.client.MakeServiceURL("product-streams", nil)
-	if err == nil {
-		verify := utils.VerifySSLHostnames
-		if !e.Config().SSLHostnameVerification() {
-			verify = utils.NoVerifySSLHostnames
-		}
-		source := simplestreams.NewURLDataSource("keystone catalog", productStreamsURL, verify)
-		e.imageSources = append(e.imageSources, source)
-	}
-	return e.imageSources, nil
+	return e.getKeystoneDataSource(&e.keystoneImageDataSourceMutex, &e.keystoneImageDataSource, "product-streams")
 }
 
-// GetToolsSources returns a list of sources which are used to search for simplestreams tools metadata.
-func (e *environ) GetToolsSources() ([]simplestreams.DataSource, error) {
-	e.toolsBaseMutex.Lock()
-	defer e.toolsBaseMutex.Unlock()
+// getKeystoneToolsSource is a tools.ToolsDataSourceFunc that
+// returns a DataSource using the "juju-tools" keystone URL.
+func getKeystoneToolsSource(env environs.Environ) (simplestreams.DataSource, error) {
+	e, ok := env.(*environ)
+	if !ok {
+		return nil, jujuerrors.NotSupportedf("non-openstack environment")
+	}
+	return e.getKeystoneDataSource(&e.keystoneToolsDataSourceMutex, &e.keystoneToolsDataSource, "juju-tools")
+}
 
-	if e.toolsSources != nil {
-		return e.toolsSources, nil
+func (e *environ) getKeystoneDataSource(mu *sync.Mutex, datasource *simplestreams.DataSource, keystoneName string) (simplestreams.DataSource, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	if *datasource != nil {
+		return *datasource, nil
 	}
 	if !e.client.IsAuthenticated() {
-		err := e.client.Authenticate()
-		if err != nil {
+		if err := authenticateClient(e); err != nil {
 			return nil, err
 		}
+	}
+
+	url, err := makeServiceURL(e.client, keystoneName, nil)
+	if err != nil {
+		return nil, jujuerrors.NewNotSupported(err, fmt.Sprintf("cannot make service URL: %v", err))
 	}
 	verify := utils.VerifySSLHostnames
 	if !e.Config().SSLHostnameVerification() {
 		verify = utils.NoVerifySSLHostnames
 	}
-	// Add the simplestreams source off the control bucket.
-	e.toolsSources = append(e.toolsSources, storage.NewStorageSimpleStreamsDataSource(
-		"cloud storage", e.Storage(), storage.BaseToolsPath))
-	// Add the simplestreams base URL from keystone if it is defined.
-	toolsURL, err := e.client.MakeServiceURL("juju-tools", nil)
-	if err == nil {
-		source := simplestreams.NewURLDataSource("keystone catalog", toolsURL, verify)
-		e.toolsSources = append(e.toolsSources, source)
-	}
-	return e.toolsSources, nil
+	*datasource = simplestreams.NewURLDataSource("keystone catalog", url, verify)
+	return *datasource, nil
 }
 
 // TODO(gz): Move this somewhere more reusable
@@ -975,7 +1027,7 @@ func (e *environ) StartInstance(args environs.StartInstanceParams) (instance.Ins
 		}
 	}
 	cfg := e.Config()
-	groups, err := e.setUpGroups(args.MachineConfig.MachineId, cfg.StatePort(), cfg.APIPort())
+	groups, err := e.setUpGroups(args.MachineConfig.MachineId, cfg.APIPort())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("cannot set up groups: %v", err)
 	}
@@ -1024,6 +1076,11 @@ func (e *environ) StartInstance(args environs.StartInstanceParams) (instance.Ins
 		inst.floatingIP = publicIP
 		logger.Infof("assigned public IP %s to %q", publicIP.IP, inst.Id())
 	}
+	if params.AnyJobNeedsState(args.MachineConfig.Jobs...) {
+		if err := common.AddStateInstance(e.Storage(), inst.Id()); err != nil {
+			logger.Errorf("could not record instance in provider-state: %v", err)
+		}
+	}
 	return inst, inst.hardwareCharacteristics(), nil, nil
 }
 
@@ -1056,13 +1113,13 @@ func (e *environ) StopInstances(ids ...instance.Id) error {
 	if securityGroupNames != nil {
 		return e.deleteSecurityGroups(securityGroupNames)
 	}
-	return nil
+	return common.RemoveStateInstances(e.Storage(), ids...)
 }
 
 // collectInstances tries to get information on each instance id in ids.
 // It fills the slots in the given map for known servers with status
 // either ACTIVE or BUILD. Returns a list of missing ids.
-func (e *environ) collectInstances(ids []instance.Id, out map[instance.Id]instance.Instance) []instance.Id {
+func (e *environ) collectInstances(ids []instance.Id, out map[string]instance.Instance) []instance.Id {
 	var err error
 	serversById := make(map[string]nova.ServerDetail)
 	if len(ids) == 1 {
@@ -1089,7 +1146,7 @@ func (e *environ) collectInstances(ids []instance.Id, out map[instance.Id]instan
 			switch server.Status {
 			case nova.StatusActive, nova.StatusBuild, nova.StatusBuildSpawning:
 				// TODO(wallyworld): lookup the flavor details to fill in the instance type data
-				out[id] = &openstackInstance{e: e, serverDetail: &server}
+				out[string(id)] = &openstackInstance{e: e, serverDetail: &server}
 				continue
 			}
 		}
@@ -1098,12 +1155,31 @@ func (e *environ) collectInstances(ids []instance.Id, out map[instance.Id]instan
 	return missing
 }
 
+// updateFloatingIPAddresses updates the instances with any floating IP address
+// that have been assigned to those instances.
+func (e *environ) updateFloatingIPAddresses(instances map[string]instance.Instance) error {
+	fips, err := e.nova().ListFloatingIPs()
+	if err != nil {
+		return err
+	}
+	for _, fip := range fips {
+		if fip.InstanceId != nil && *fip.InstanceId != "" {
+			instId := *fip.InstanceId
+			if inst, ok := instances[instId]; ok {
+				instFip := fip
+				inst.(*openstackInstance).floatingIP = &instFip
+			}
+		}
+	}
+	return nil
+}
+
 func (e *environ) Instances(ids []instance.Id) ([]instance.Instance, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
 	missing := ids
-	found := make(map[instance.Id]instance.Instance)
+	found := make(map[string]instance.Instance)
 	// Make a series of requests to cope with eventual consistency.
 	// Each request will attempt to add more instances to the requested
 	// set.
@@ -1115,10 +1191,18 @@ func (e *environ) Instances(ids []instance.Id) ([]instance.Instance, error) {
 	if len(found) == 0 {
 		return nil, environs.ErrNoInstances
 	}
+
+	// Update the instance structs with any floating IP address that has been assigned to the instance.
+	if e.ecfg().useFloatingIP() {
+		if err := e.updateFloatingIPAddresses(found); err != nil {
+			return nil, err
+		}
+	}
+
 	insts := make([]instance.Instance, len(ids))
 	var err error
 	for i, id := range ids {
-		if inst := found[id]; inst != nil {
+		if inst := found[string(id)]; inst != nil {
 			insts[i] = inst
 		} else {
 			err = environs.ErrPartialInstances
@@ -1147,15 +1231,23 @@ func (e *environ) AllInstances() (insts []instance.Instance, err error) {
 	if err != nil {
 		return nil, err
 	}
+	instsById := make(map[string]instance.Instance)
 	for _, server := range servers {
 		if server.Status == nova.StatusActive || server.Status == nova.StatusBuild {
 			var s = server
 			// TODO(wallyworld): lookup the flavor details to fill in the instance type data
-			insts = append(insts, &openstackInstance{
-				e:            e,
-				serverDetail: &s,
-			})
+			instsById[s.Id] = &openstackInstance{e: e, serverDetail: &s}
 		}
+	}
+
+	if e.ecfg().useFloatingIP() {
+		if err := e.updateFloatingIPAddresses(instsById); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, inst := range instsById {
+		insts = append(insts, inst)
 	}
 	return insts, err
 }
@@ -1163,16 +1255,19 @@ func (e *environ) AllInstances() (insts []instance.Instance, err error) {
 func (e *environ) Destroy() error {
 	err := common.Destroy(e)
 	if err != nil {
-		return err
+		return jujuerrors.Trace(err)
+	}
+	if err := e.Storage().RemoveAll(); err != nil {
+		return jujuerrors.Trace(err)
 	}
 	novaClient := e.nova()
 	securityGroups, err := novaClient.ListSecurityGroups()
 	if err != nil {
-		return err
+		return jujuerrors.Annotate(err, "cannot list security groups")
 	}
 	re, err := regexp.Compile(fmt.Sprintf("^%s(-\\d+)?$", e.jujuGroupName()))
 	if err != nil {
-		return err
+		return jujuerrors.Trace(err)
 	}
 	globalGroupName := e.globalGroupName()
 	for _, group := range securityGroups {
@@ -1330,19 +1425,13 @@ func (e *environ) Provider() environs.EnvironProvider {
 	return &providerInstance
 }
 
-func (e *environ) setUpGlobalGroup(groupName string, statePort, apiPort int) (nova.SecurityGroup, error) {
+func (e *environ) setUpGlobalGroup(groupName string, apiPort int) (nova.SecurityGroup, error) {
 	return e.ensureGroup(groupName,
 		[]nova.RuleInfo{
 			{
 				IPProtocol: "tcp",
 				FromPort:   22,
 				ToPort:     22,
-				Cidr:       "0.0.0.0/0",
-			},
-			{
-				IPProtocol: "tcp",
-				FromPort:   statePort,
-				ToPort:     statePort,
 				Cidr:       "0.0.0.0/0",
 			},
 			{
@@ -1380,8 +1469,8 @@ func (e *environ) setUpGlobalGroup(groupName string, statePort, apiPort int) (no
 // Note: ideally we'd have a better way to determine group membership so that 2
 // people that happen to share an openstack account and name their environment
 // "openstack" don't end up destroying each other's machines.
-func (e *environ) setUpGroups(machineId string, statePort, apiPort int) ([]nova.SecurityGroup, error) {
-	jujuGroup, err := e.setUpGlobalGroup(e.jujuGroupName(), statePort, apiPort)
+func (e *environ) setUpGroups(machineId string, apiPort int) ([]nova.SecurityGroup, error) {
+	jujuGroup, err := e.setUpGlobalGroup(e.jujuGroupName(), apiPort)
 	if err != nil {
 		return nil, err
 	}

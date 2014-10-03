@@ -10,15 +10,15 @@ import (
 
 	"github.com/juju/names"
 	jc "github.com/juju/testing/checkers"
-	gc "launchpad.net/gocheck"
+	gc "gopkg.in/check.v1"
 
 	"github.com/juju/juju/agent"
+	"github.com/juju/juju/api"
+	apimachiner "github.com/juju/juju/api/machiner"
+	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/juju/testing"
 	"github.com/juju/juju/network"
 	"github.com/juju/juju/state"
-	"github.com/juju/juju/state/api"
-	apimachiner "github.com/juju/juju/state/api/machiner"
-	"github.com/juju/juju/state/api/params"
 	coretesting "github.com/juju/juju/testing"
 	"github.com/juju/juju/worker"
 	"github.com/juju/juju/worker/machiner"
@@ -60,7 +60,7 @@ func (s *MachinerSuite) SetUpTest(c *gc.C) {
 	c.Assert(s.apiMachine.Tag(), gc.Equals, s.machine.Tag())
 }
 
-func (s *MachinerSuite) waitMachineStatus(c *gc.C, m *state.Machine, expectStatus params.Status) {
+func (s *MachinerSuite) waitMachineStatus(c *gc.C, m *state.Machine, expectStatus state.Status) {
 	timeout := time.After(worstCase)
 	for {
 		select {
@@ -112,20 +112,20 @@ func (s *MachinerSuite) TestRunStop(c *gc.C) {
 func (s *MachinerSuite) TestStartSetsStatus(c *gc.C) {
 	status, info, _, err := s.machine.Status()
 	c.Assert(err, gc.IsNil)
-	c.Assert(status, gc.Equals, params.StatusPending)
+	c.Assert(status, gc.Equals, state.StatusPending)
 	c.Assert(info, gc.Equals, "")
 
 	mr := s.makeMachiner()
 	defer worker.Stop(mr)
 
-	s.waitMachineStatus(c, s.machine, params.StatusStarted)
+	s.waitMachineStatus(c, s.machine, state.StatusStarted)
 }
 
 func (s *MachinerSuite) TestSetsStatusWhenDying(c *gc.C) {
 	mr := s.makeMachiner()
 	defer worker.Stop(mr)
 	c.Assert(s.machine.Destroy(), gc.IsNil)
-	s.waitMachineStatus(c, s.machine, params.StatusStopped)
+	s.waitMachineStatus(c, s.machine, state.StatusStopped)
 }
 
 func (s *MachinerSuite) TestSetDead(c *gc.C) {
@@ -146,6 +146,8 @@ func (s *MachinerSuite) TestMachineAddresses(c *gc.C) {
 			&net.IPAddr{IP: net.IPv6loopback},
 			&net.UnixAddr{}, // not IP, ignored
 			&net.IPNet{IP: net.ParseIP("2001:db8::1")},
+			&net.IPAddr{IP: net.IPv4(169, 254, 1, 20)}, // LinkLocal Ignored
+			&net.IPNet{IP: net.ParseIP("fe80::1")},     // LinkLocal Ignored
 		}
 		return addrs, nil
 	})

@@ -4,6 +4,7 @@
 package watcher
 
 import (
+	"github.com/juju/errors"
 	"launchpad.net/tomb"
 )
 
@@ -21,18 +22,24 @@ type Errer interface {
 // watcher, t is killed with the error.
 func Stop(w Stopper, t *tomb.Tomb) {
 	if err := w.Stop(); err != nil {
+		if err != tomb.ErrStillAlive && err != tomb.ErrDying {
+			// tomb.Kill() checks for the two errors above
+			// by value, so we shouldn't wrap them, but we
+			// wrap any other error.
+			err = errors.Trace(err)
+		}
 		t.Kill(err)
 	}
 }
 
-// MustErr returns the error with which w died.
-// Calling it will panic if w is still running or was stopped cleanly.
-func MustErr(w Errer) error {
+// EnsureErr returns the error with which w died. Calling it will also
+// return an error if w is still running or was stopped cleanly.
+func EnsureErr(w Errer) error {
 	err := w.Err()
 	if err == nil {
-		panic("watcher was stopped cleanly")
+		return errors.Errorf("expected an error from %#v, got nil", w)
 	} else if err == tomb.ErrStillAlive {
-		panic("watcher is still running")
+		return errors.Annotatef(err, "expected %#v to be stopped", w)
 	}
-	return err
+	return errors.Trace(err)
 }

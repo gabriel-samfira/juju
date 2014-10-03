@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/juju/errors"
 	"github.com/juju/loggo"
 	"github.com/juju/utils"
 
@@ -26,8 +27,13 @@ var logger = loggo.GetLogger("juju.environs.sync")
 
 // SyncContext describes the context for tool synchronization.
 type SyncContext struct {
-	// Target holds the destination for the tool synchronization
-	Target storage.Storage
+	// TargetToolsFinder is a ToolsFinder provided to find existing
+	// tools in the target destination.
+	TargetToolsFinder ToolsFinder
+
+	// TargetToolsUploader is a ToolsUploader provided to upload
+	// tools to the target destination.
+	TargetToolsUploader ToolsUploader
 
 	// AllVersions controls the copy of all versions, not only the latest.
 	AllVersions bool
@@ -42,15 +48,25 @@ type SyncContext struct {
 	// what would be coppied.
 	DryRun bool
 
-	// Dev controls the copy of development versions as well as released ones.
-	Dev bool
-
-	// Tools are being synced for a public cloud so include mirrors information.
-	Public bool
+	// Stream specifies the simplestreams stream to use (defaults to "Released").
+	Stream string
 
 	// Source, if non-empty, specifies a directory in the local file system
 	// to use as a source.
 	Source string
+}
+
+// ToolsFinder provides an interface for finding tools of a specified version.
+type ToolsFinder interface {
+	// FindTools returns a list of tools with the specified major version.
+	FindTools(major int) (coretools.List, error)
+}
+
+// ToolsUploader provides an interface for uploading tools and associated
+// metadata.
+type ToolsUploader interface {
+	// UploadTools uploads the tools with the specified version and tarball contents.
+	UploadTools(stream string, tools *coretools.Tools, data []byte) error
 }
 
 // SyncTools copies the Juju tools tarball from the official bucket
@@ -68,16 +84,27 @@ func SyncTools(syncContext *SyncContext) error {
 		if !syncContext.AllVersions {
 			syncContext.MinorVersion = version.Current.Minor
 		}
-	} else if !syncContext.Dev && syncContext.MinorVersion != -1 {
-		// If a major.minor version is specified, we allow dev versions.
-		// If Dev is already true, leave it alone.
-		syncContext.Dev = true
 	}
 
-	released := !syncContext.Dev && !version.Current.IsDev()
+	// If no stream has been specified, assume "released" for non-devel versions of Juju.
+	if syncContext.Stream == "" {
+		if !version.Current.IsDev() {
+			syncContext.Stream = envtools.ReleasedStream
+		} else {
+			syncContext.Stream = envtools.TestingStream
+		}
+	}
 	sourceTools, err := envtools.FindToolsForCloud(
 		[]simplestreams.DataSource{sourceDataSource}, simplestreams.CloudSpec{},
-		syncContext.MajorVersion, syncContext.MinorVersion, coretools.Filter{Released: released})
+		syncContext.Stream, syncContext.MajorVersion, syncContext.MinorVersion, coretools.Filter{})
+	// For backwards compatibility with cloud storage, if there are no tools in the specified stream,
+	// double check the release stream.
+	// TODO - remove this when we no longer need to support cloud storage upgrades.
+	if err == envtools.ErrNoTools {
+		sourceTools, err = envtools.FindToolsForCloud(
+			[]simplestreams.DataSource{sourceDataSource}, simplestreams.CloudSpec{},
+			envtools.ReleasedStream, syncContext.MajorVersion, syncContext.MinorVersion, coretools.Filter{})
+	}
 	if err != nil {
 		return err
 	}
@@ -93,8 +120,7 @@ func SyncTools(syncContext *SyncContext) error {
 	}
 
 	logger.Infof("listing target tools storage")
-	targetStorage := syncContext.Target
-	targetTools, err := envtools.ReadList(targetStorage, syncContext.MajorVersion, -1)
+	targetTools, err := syncContext.TargetToolsFinder.FindTools(syncContext.MajorVersion)
 	switch err {
 	case nil, coretools.ErrNoMatches, envtools.ErrNoTools:
 	default:
@@ -106,25 +132,18 @@ func SyncTools(syncContext *SyncContext) error {
 
 	missing := sourceTools.Exclude(targetTools)
 	logger.Infof("found %d tools in target; %d tools to be copied", len(targetTools), len(missing))
-	err = copyTools(missing, syncContext, targetStorage)
+	if syncContext.DryRun {
+		for _, tools := range missing {
+			logger.Infof("copying %s from %s", tools.Version, tools.URL)
+		}
+		return nil
+	}
+
+	err = copyTools(syncContext.Stream, missing, syncContext.TargetToolsUploader)
 	if err != nil {
 		return err
 	}
 	logger.Infof("copied %d tools", len(missing))
-
-	logger.Infof("generating tools metadata")
-	if !syncContext.DryRun {
-		targetTools = append(targetTools, missing...)
-		writeMirrors := envtools.DoNotWriteMirrors
-		if syncContext.Public {
-			writeMirrors = envtools.WriteMirrors
-		}
-		err = envtools.MergeAndWriteMetadata(targetStorage, targetTools, writeMirrors)
-		if err != nil {
-			return err
-		}
-	}
-	logger.Infof("tools metadata written")
 	return nil
 }
 
@@ -143,13 +162,10 @@ func selectSourceDatasource(syncContext *SyncContext) (simplestreams.DataSource,
 }
 
 // copyTools copies a set of tools from the source to the target.
-func copyTools(tools []*coretools.Tools, syncContext *SyncContext, dest storage.Storage) error {
+func copyTools(stream string, tools []*coretools.Tools, u ToolsUploader) error {
 	for _, tool := range tools {
 		logger.Infof("copying %s from %s", tool.Version, tool.URL)
-		if syncContext.DryRun {
-			continue
-		}
-		if err := copyOneToolsPackage(tool, dest); err != nil {
+		if err := copyOneToolsPackage(stream, tool, u); err != nil {
 			return err
 		}
 	}
@@ -157,24 +173,28 @@ func copyTools(tools []*coretools.Tools, syncContext *SyncContext, dest storage.
 }
 
 // copyOneToolsPackage copies one tool from the source to the target.
-func copyOneToolsPackage(tool *coretools.Tools, dest storage.Storage) error {
-	toolsName := envtools.StorageName(tool.Version)
-	logger.Infof("copying %v", toolsName)
-	resp, err := utils.GetValidatingHTTPClient().Get(tool.URL)
+func copyOneToolsPackage(stream string, tools *coretools.Tools, u ToolsUploader) error {
+	toolsName := envtools.StorageName(tools.Version)
+	logger.Infof("downloading %q %v (%v)", stream, toolsName, tools.URL)
+	resp, err := utils.GetValidatingHTTPClient().Get(tools.URL)
 	if err != nil {
 		return err
 	}
-	buf := &bytes.Buffer{}
-	srcFile := resp.Body
-	defer srcFile.Close()
-	tool.SHA256, tool.Size, err = utils.ReadSHA256(io.TeeReader(srcFile, buf))
+	defer resp.Body.Close()
+	// Verify SHA-256 hash.
+	var buf bytes.Buffer
+	sha256, size, err := utils.ReadSHA256(io.TeeReader(resp.Body, &buf))
 	if err != nil {
 		return err
 	}
-	sizeInKB := (tool.Size + 512) / 1024
-	logger.Infof("downloaded %v (%dkB), uploading", toolsName, sizeInKB)
-	logger.Infof("download %dkB, uploading", sizeInKB)
-	return dest.Put(toolsName, buf, tool.Size)
+	if tools.SHA256 == "" {
+		logger.Warningf("no SHA-256 hash for %v", tools.SHA256)
+	} else if sha256 != tools.SHA256 {
+		return errors.Errorf("SHA-256 hash mismatch (%v/%v)", sha256, tools.SHA256)
+	}
+	sizeInKB := (size + 512) / 1024
+	logger.Infof("uploading %v (%dkB) to environment", toolsName, sizeInKB)
+	return u.UploadTools(stream, tools, buf.Bytes())
 }
 
 // UploadFunc is the type of Upload, which may be
@@ -248,7 +268,7 @@ func cloneToolsForSeries(toolsInfo *BuiltTools, series ...string) error {
 		return err
 	}
 	logger.Debugf("generating tools metadata")
-	return envtools.MergeAndWriteMetadata(metadataStore, targetTools, false)
+	return envtools.MergeAndWriteMetadata(metadataStore, "released", targetTools, false)
 }
 
 // BuiltTools contains metadata for a tools tarball resulting from
@@ -328,13 +348,18 @@ func SyncBuiltTools(stor storage.Storage, builtTools *BuiltTools, fakeSeries ...
 	if err := cloneToolsForSeries(builtTools, fakeSeries...); err != nil {
 		return nil, err
 	}
+	stream := envtools.ReleasedStream
+	if builtTools.Version.IsDev() {
+		stream = envtools.TestingStream
+	}
 	syncContext := &SyncContext{
-		Source:       builtTools.Dir,
-		Target:       stor,
-		AllVersions:  true,
-		Dev:          builtTools.Version.IsDev(),
-		MajorVersion: builtTools.Version.Major,
-		MinorVersion: -1,
+		Source:              builtTools.Dir,
+		TargetToolsFinder:   StorageToolsFinder{stor},
+		TargetToolsUploader: StorageToolsUploader{stor, false, false},
+		AllVersions:         true,
+		Stream:              stream,
+		MajorVersion:        builtTools.Version.Major,
+		MinorVersion:        -1,
 	}
 	logger.Debugf("uploading tools to cloud storage")
 	err := SyncTools(syncContext)
@@ -351,4 +376,39 @@ func SyncBuiltTools(stor storage.Storage, builtTools *BuiltTools, fakeSeries ...
 		Size:    builtTools.Size,
 		SHA256:  builtTools.Sha256Hash,
 	}, nil
+}
+
+// StorageToolsFinder is an implementation of ToolsFinder
+// that searches for tools in the specified storage.
+type StorageToolsFinder struct {
+	Storage storage.StorageReader
+}
+
+func (f StorageToolsFinder) FindTools(major int) (coretools.List, error) {
+	return envtools.ReadList(f.Storage, major, -1)
+}
+
+// StorageToolsUplader is an implementation of ToolsUploader that
+// writes tools to the provided storage and then writes merged
+// metadata, optionally with mirrors.
+type StorageToolsUploader struct {
+	Storage       storage.Storage
+	WriteMetadata bool
+	WriteMirrors  envtools.ShouldWriteMirrors
+}
+
+func (u StorageToolsUploader) UploadTools(stream string, tools *coretools.Tools, data []byte) error {
+	toolsName := envtools.StorageName(tools.Version)
+	if err := u.Storage.Put(toolsName, bytes.NewReader(data), int64(len(data))); err != nil {
+		return err
+	}
+	if !u.WriteMetadata {
+		return nil
+	}
+	err := envtools.MergeAndWriteMetadata(u.Storage, stream, coretools.List{tools}, u.WriteMirrors)
+	if err != nil {
+		logger.Errorf("error writing tools metadata: %v", err)
+		return err
+	}
+	return nil
 }

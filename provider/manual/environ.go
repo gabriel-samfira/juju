@@ -22,10 +22,8 @@ import (
 	"github.com/juju/juju/environs/config"
 	"github.com/juju/juju/environs/httpstorage"
 	"github.com/juju/juju/environs/manual"
-	"github.com/juju/juju/environs/simplestreams"
 	"github.com/juju/juju/environs/sshstorage"
 	"github.com/juju/juju/environs/storage"
-	envtools "github.com/juju/juju/environs/tools"
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/juju/arch"
 	"github.com/juju/juju/mongo"
@@ -53,7 +51,6 @@ const (
 
 var (
 	logger                                       = loggo.GetLogger("juju.provider.manual")
-	commonEnsureBootstrapTools                   = common.EnsureBootstrapTools
 	manualCheckProvisioned                       = manual.CheckProvisioned
 	manualDetectSeriesAndHardwareCharacteristics = manual.DetectSeriesAndHardwareCharacteristics
 )
@@ -67,8 +64,6 @@ type manualEnviron struct {
 	ubuntuUserInited    bool
 	ubuntuUserInitMutex sync.Mutex
 }
-
-var _ envtools.SupportsCustomSources = (*manualEnviron)(nil)
 
 var errNoStartInstance = errors.New("manual provider cannot start instances")
 var errNoStopInstance = errors.New("manual provider cannot stop instances")
@@ -133,24 +128,11 @@ func (e *manualEnviron) Bootstrap(ctx environs.BootstrapContext, args environs.B
 	if err != nil {
 		return "", "", nil, err
 	}
-	_, err = commonEnsureBootstrapTools(ctx, e, series, hc.Arch)
-	if err != nil {
-		return "", "", nil, err
-	}
 	finalize := func(ctx environs.BootstrapContext, mcfg *cloudinit.MachineConfig) error {
 		mcfg.InstanceId = BootstrapInstanceId
 		mcfg.HardwareCharacteristics = &hc
 		if err := environs.FinishMachineConfig(mcfg, e.Config()); err != nil {
 			return err
-		}
-		// If the tools are on the machine already, get a file:// scheme tools URL.
-		// TODO(axw) this can go once environs/bootstrap.Bootstrap takes care of
-		// serialising tools through cloudconfig/sshinit.
-		storageDir := e.StorageDir()
-		toolsStorageName := envtools.StorageName(mcfg.Tools.Version)
-		bootstrapStorage := e.Storage()
-		if url, _ := bootstrapStorage.URL(toolsStorageName); url == mcfg.Tools.URL {
-			mcfg.Tools.URL = fmt.Sprintf("file://%s/%s", storageDir, toolsStorageName)
 		}
 		for k, v := range agentEnv {
 			mcfg.AgentEnvironment[k] = v
@@ -287,15 +269,6 @@ var newSSHStorage = func(sshHost, storageDir, storageTmpdir string) (storage.Sto
 		StorageDir: storageDir,
 		TmpDir:     storageTmpdir,
 	})
-}
-
-// GetToolsSources returns a list of sources which are
-// used to search for simplestreams tools metadata.
-func (e *manualEnviron) GetToolsSources() ([]simplestreams.DataSource, error) {
-	// Add the simplestreams source off private storage.
-	return []simplestreams.DataSource{
-		storage.NewStorageSimpleStreamsDataSource("cloud storage", e.Storage(), storage.BaseToolsPath),
-	}, nil
 }
 
 func (e *manualEnviron) Storage() storage.Storage {

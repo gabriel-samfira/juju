@@ -3,11 +3,13 @@
 
 package tools
 
-var Setenv = setenv
-
-var FindExecutable = findExecutable
-
-var CheckToolsSeries = checkToolsSeries
+var (
+	Setenv                = setenv
+	FindExecutable        = findExecutable
+	CheckToolsSeries      = checkToolsSeries
+	ArchiveAndSHA256      = archiveAndSHA256
+	CurrentStreamsVersion = currentStreamsVersion
+)
 
 // SetSigningPublicKey sets a new public key for testing and returns the original key.
 func SetSigningPublicKey(key string) string {

@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"strings"
 
-	gc "launchpad.net/gocheck"
+	gc "gopkg.in/check.v1"
 
+	keymanagerserver "github.com/juju/juju/apiserver/keymanager"
+	keymanagertesting "github.com/juju/juju/apiserver/keymanager/testing"
 	"github.com/juju/juju/cmd/envcmd"
 	"github.com/juju/juju/juju/osenv"
 	jujutesting "github.com/juju/juju/juju/testing"
-	keymanagerserver "github.com/juju/juju/state/apiserver/keymanager"
-	keymanagertesting "github.com/juju/juju/state/apiserver/keymanager/testing"
 	coretesting "github.com/juju/juju/testing"
 	"github.com/juju/juju/testing/factory"
 	sshtesting "github.com/juju/juju/utils/ssh/testing"

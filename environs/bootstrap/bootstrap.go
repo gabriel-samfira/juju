@@ -5,24 +5,57 @@ package bootstrap
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/juju/errors"
 	"github.com/juju/loggo"
+	"github.com/juju/utils"
 
+	"github.com/juju/juju/constraints"
 	"github.com/juju/juju/environs"
-	"github.com/juju/juju/environs/config"
+	"github.com/juju/juju/environs/imagemetadata"
+	"github.com/juju/juju/environs/simplestreams"
+	"github.com/juju/juju/environs/storage"
+	"github.com/juju/juju/environs/sync"
+	"github.com/juju/juju/environs/tools"
 	"github.com/juju/juju/network"
 	coretools "github.com/juju/juju/tools"
 	"github.com/juju/juju/utils/ssh"
 	"github.com/juju/juju/version"
 )
 
-var logger = loggo.GetLogger("juju.environs.bootstrap")
+const noToolsMessage = `Juju cannot bootstrap because no tools are available for your environment.
+You may want to use the 'tools-metadata-url' configuration setting to specify the tools location.
+`
+
+var (
+	logger = loggo.GetLogger("juju.environs.bootstrap")
+)
+
+// BootstrapParams holds the parameters for bootstrapping an environment.
+type BootstrapParams struct {
+	// Constraints are used to choose the initial instance specification,
+	// and will be stored in the new environment's state.
+	Constraints constraints.Value
+
+	// Placement, if non-empty, holds an environment-specific placement
+	// directive used to choose the initial instance.
+	Placement string
+
+	// UploadTools reports whether we should upload the local tools and
+	// override the environment's specified agent-version.
+	UploadTools bool
+
+	// MetadataDir is an optional path to a local directory containing
+	// tools and/or image metadata.
+	MetadataDir string
+}
 
 // Bootstrap bootstraps the given environment. The supplied constraints are
 // used to provision the instance, and are also set within the bootstrapped
 // environment.
-func Bootstrap(ctx environs.BootstrapContext, environ environs.Environ, args environs.BootstrapParams) error {
+func Bootstrap(ctx environs.BootstrapContext, environ environs.Environ, args BootstrapParams) error {
 	cfg := environ.Config()
 	network.InitializeFromConfig(cfg)
 	if secret := cfg.AdminSecret(); secret == "" {
@@ -43,42 +76,90 @@ func Bootstrap(ctx environs.BootstrapContext, environ environs.Environ, args env
 		return errors.Errorf("environment configuration has no ca-private-key")
 	}
 
-	// Write out the bootstrap-init file, and confirm storage is writeable.
-	if err := environs.VerifyStorage(environ.Storage()); err != nil {
-		return err
+	// Set default tools metadata source, add image metadata source,
+	// then verify constraints. Providers may rely on image metadata
+	// for constraint validation.
+	var imageMetadata []*imagemetadata.ImageMetadata
+	if args.MetadataDir != "" {
+		var err error
+		imageMetadata, err = setPrivateMetadataSources(environ, args.MetadataDir)
+		if err != nil {
+			return err
+		}
 	}
-
-	// We must generate an SSH key for the state servers to log into other instances.
-	// generateSystemSSHKey updates the environment's authorized-keys, so this must
-	// be done before bootstrapping.
-	privateKey, err := generateSystemSSHKey(environ)
-	if err != nil {
+	if err := validateConstraints(environ, args.Constraints); err != nil {
 		return err
 	}
 
 	ctx.Infof("Bootstrapping environment %q", cfg.Name())
 	logger.Debugf("environment %q supports service/machine networks: %v", cfg.Name(), environ.SupportNetworks())
+	disableNetworkManagement, _ := cfg.DisableNetworkManagement()
+	logger.Debugf("network management by juju enabled: %v", disableNetworkManagement)
+	availableTools, err := findAvailableTools(environ, args.Constraints.Arch, args.UploadTools)
+	if errors.IsNotFound(err) {
+		return errors.New(noToolsMessage)
+	} else if err != nil {
+		return err
+	}
+
+	// If we're uploading, we must override agent-version;
+	// if we're not uploading, we want to ensure we have an
+	// agent-version set anyway, to appease FinishMachineConfig.
+	// In the latter case, setBootstrapTools will later set
+	// agent-version to the correct thing.
+	if cfg, err = cfg.Apply(map[string]interface{}{
+		"agent-version": version.Current.Number.String(),
+	}); err != nil {
+		return err
+	}
+	if err = environ.SetConfig(cfg); err != nil {
+		return err
+	}
 
 	ctx.Infof("Starting new instance for initial state server")
-	arch, series, finalizer, err := environ.Bootstrap(ctx, args)
+	arch, series, finalizer, err := environ.Bootstrap(ctx, environs.BootstrapParams{
+		Constraints:    args.Constraints,
+		Placement:      args.Placement,
+		AvailableTools: availableTools,
+	})
 	if err != nil {
 		return err
 	}
 
-	// TODO(axw) remove EnsureToolsAvailability calls from providers,
-	// make this function responsible for locating tools first and
-	// uploading during finalization if necessary.
-	availableTools, err := EnsureToolsAvailability(ctx, environ, series, &arch)
+	matchingTools, err := availableTools.Match(coretools.Filter{
+		Arch:   arch,
+		Series: series,
+	})
 	if err != nil {
 		return err
+	}
+	selectedTools, err := setBootstrapTools(environ, matchingTools)
+	if err != nil {
+		return err
+	}
+	if selectedTools.URL == "" {
+		if !args.UploadTools {
+			logger.Warningf("no prepackaged tools available")
+		}
+		ctx.Infof("Building tools to upload (%s)", selectedTools.Version)
+		builtTools, err := sync.BuildToolsTarball(&selectedTools.Version.Number)
+		if err != nil {
+			return errors.Annotate(err, "cannot upload bootstrap tools")
+		}
+		defer os.RemoveAll(builtTools.Dir)
+		filename := filepath.Join(builtTools.Dir, builtTools.StorageName)
+		selectedTools.URL = fmt.Sprintf("file://%s", filename)
+		selectedTools.Size = builtTools.Size
+		selectedTools.SHA256 = builtTools.Sha256Hash
 	}
 
 	ctx.Infof("Installing Juju agent on bootstrap instance")
-	machineConfig, err := environs.NewBootstrapMachineConfig(args.Constraints, privateKey, series)
+	machineConfig, err := environs.NewBootstrapMachineConfig(args.Constraints, series)
 	if err != nil {
 		return err
 	}
-	machineConfig.Tools = availableTools[0]
+	machineConfig.Tools = selectedTools
+	machineConfig.CustomImageMetadata = imageMetadata
 	if err := finalizer(ctx, machineConfig); err != nil {
 		return err
 	}
@@ -86,32 +167,9 @@ func Bootstrap(ctx environs.BootstrapContext, environ environs.Environ, args env
 	return nil
 }
 
-// generateSystemSSHKey creates a new key for the system identity. The
-// authorized_keys in the environment config is updated to include the public
-// key for the generated key.
-func generateSystemSSHKey(env environs.Environ) (privateKey string, err error) {
-	logger.Debugf("generate a system ssh key")
-	// Create a new system ssh key and add that to the authorized keys.
-	privateKey, publicKey, err := ssh.GenerateKey(config.JujuSystemKey)
-	if err != nil {
-		return "", fmt.Errorf("failed to create system key: %v", err)
-	}
-	authorized_keys := config.ConcatAuthKeys(env.Config().AuthorizedKeys(), publicKey)
-	newConfig, err := env.Config().Apply(map[string]interface{}{
-		config.AuthKeysConfig: authorized_keys,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to create new config: %v", err)
-	}
-	if err = env.SetConfig(newConfig); err != nil {
-		return "", fmt.Errorf("failed to set new config: %v", err)
-	}
-	return privateKey, nil
-}
-
-// SetBootstrapTools returns the newest tools from the given tools list,
+// setBootstrapTools returns the newest tools from the given tools list,
 // and updates the agent-version configuration attribute.
-func SetBootstrapTools(environ environs.Environ, possibleTools coretools.List) (coretools.List, error) {
+func setBootstrapTools(environ environs.Environ, possibleTools coretools.List) (*coretools.Tools, error) {
 	if len(possibleTools) == 0 {
 		return nil, fmt.Errorf("no bootstrap tools available")
 	}
@@ -146,7 +204,7 @@ func SetBootstrapTools(environ environs.Environ, possibleTools coretools.List) (
 		}
 	}
 	logger.Infof("picked bootstrap tools version: %s", bootstrapVersion)
-	return toolsList, nil
+	return toolsList[0], nil
 }
 
 // findCompatibleTools finds tools in the list that have the same major, minor
@@ -168,6 +226,52 @@ func isCompatibleVersion(v1, v2 version.Number) bool {
 	v1.Build = 0
 	v2.Build = 0
 	return v1.Compare(v2) == 0
+}
+
+// setPrivateMetadataSources sets the default tools metadata source
+// for tools syncing, and adds an image metadata source after verifying
+// the contents.
+func setPrivateMetadataSources(env environs.Environ, metadataDir string) ([]*imagemetadata.ImageMetadata, error) {
+	logger.Infof("Setting default tools and image metadata sources: %s", metadataDir)
+	tools.DefaultBaseURL = metadataDir
+
+	imageMetadataDir := filepath.Join(metadataDir, storage.BaseImagesPath)
+	if _, err := os.Stat(imageMetadataDir); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, errors.Annotate(err, "cannot access image metadata")
+		}
+		return nil, nil
+	}
+
+	baseURL := fmt.Sprintf("file://%s", filepath.ToSlash(imageMetadataDir))
+	datasource := simplestreams.NewURLDataSource("bootstrap metadata", baseURL, utils.NoVerifySSLHostnames)
+
+	// Read the image metadata, as we'll want to upload it to the environment.
+	imageConstraint := imagemetadata.NewImageConstraint(simplestreams.LookupParams{})
+	existingMetadata, _, err := imagemetadata.Fetch(
+		[]simplestreams.DataSource{datasource}, imageConstraint, false)
+	if err != nil && !errors.IsNotFound(err) {
+		return nil, errors.Annotate(err, "cannot read image metadata")
+	}
+
+	// Add an image metadata datasource for constraint validation, etc.
+	environs.RegisterImageDataSourceFunc("bootstrap metadata", func(environs.Environ) (simplestreams.DataSource, error) {
+		return datasource, nil
+	})
+	logger.Infof("custom image metadata added to search path")
+	return existingMetadata, nil
+}
+
+func validateConstraints(env environs.Environ, cons constraints.Value) error {
+	validator, err := env.ConstraintsValidator()
+	if err != nil {
+		return err
+	}
+	unsupported, err := validator.Validate(cons)
+	if len(unsupported) > 0 {
+		logger.Warningf("unsupported constraints: %v", unsupported)
+	}
+	return err
 }
 
 // EnsureNotBootstrapped returns nil if the environment is not

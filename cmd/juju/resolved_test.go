@@ -4,13 +4,12 @@
 package main
 
 import (
-	charmtesting "gopkg.in/juju/charm.v3/testing"
-	gc "launchpad.net/gocheck"
+	gc "gopkg.in/check.v1"
+	charmtesting "gopkg.in/juju/charm.v4/testing"
 
 	"github.com/juju/juju/cmd/envcmd"
 	jujutesting "github.com/juju/juju/juju/testing"
 	"github.com/juju/juju/state"
-	"github.com/juju/juju/state/api/params"
 	"github.com/juju/juju/testing"
 )
 
@@ -81,7 +80,7 @@ func (s *ResolvedSuite) TestResolved(c *gc.C) {
 	for _, name := range []string{"dummy/2", "dummy/3", "dummy/4"} {
 		u, err := s.State.Unit(name)
 		c.Assert(err, gc.IsNil)
-		err = u.SetStatus(params.StatusError, "lol borken", nil)
+		err = u.SetStatus(state.StatusError, "lol borken", nil)
 		c.Assert(err, gc.IsNil)
 	}
 

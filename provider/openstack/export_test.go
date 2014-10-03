@@ -16,6 +16,7 @@ import (
 
 	"github.com/juju/juju/constraints"
 	"github.com/juju/juju/environs"
+	"github.com/juju/juju/environs/imagemetadata"
 	"github.com/juju/juju/environs/instances"
 	"github.com/juju/juju/environs/jujutest"
 	"github.com/juju/juju/environs/simplestreams"
@@ -64,6 +65,10 @@ func InstanceServerDetail(inst instance.Instance) *nova.ServerDetail {
 	return inst.(*openstackInstance).serverDetail
 }
 
+func InstanceFloatingIP(inst instance.Instance) *nova.FloatingIP {
+	return inst.(*openstackInstance).floatingIP
+}
+
 var (
 	NovaListAvailabilityZones   = &novaListAvailabilityZones
 	AvailabilityZoneAllocations = &availabilityZoneAllocations
@@ -84,9 +89,9 @@ var indexData = `
 		   "datatype": "image-ids",
 		   "format": "products:1.0",
 		   "products": [
-			"com.ubuntu.cloud:server:12.04:amd64",
-			"com.ubuntu.cloud:server:12.04:i386",
-			"com.ubuntu.cloud:server:12.04:ppc64el",
+			"com.ubuntu.cloud:server:14.04:amd64",
+			"com.ubuntu.cloud:server:14.04:i386",
+			"com.ubuntu.cloud:server:14.04:ppc64el",
 			"com.ubuntu.cloud:server:12.10:amd64",
 			"com.ubuntu.cloud:server:13.04:amd64"
 		   ],
@@ -102,9 +107,9 @@ var imagesData = `
 {
  "content_id": "com.ubuntu.cloud:released:openstack",
  "products": {
-   "com.ubuntu.cloud:server:12.04:amd64": {
-     "release": "precise",
-     "version": "12.04",
+   "com.ubuntu.cloud:server:14.04:amd64": {
+     "release": "trusty",
+     "version": "14.04",
      "arch": "amd64",
      "versions": {
        "20121218": {
@@ -122,7 +127,7 @@ var imagesData = `
              "id": "2"
            }
          },
-         "pubname": "ubuntu-precise-12.04-amd64-server-20121218",
+         "pubname": "ubuntu-trusty-14.04-amd64-server-20121218",
          "label": "release"
        },
        "20121111": {
@@ -134,14 +139,14 @@ var imagesData = `
              "id": "3"
            }
          },
-         "pubname": "ubuntu-precise-12.04-amd64-server-20121111",
+         "pubname": "ubuntu-trusty-14.04-amd64-server-20121111",
          "label": "release"
        }
      }
    },
-   "com.ubuntu.cloud:server:12.04:i386": {
-     "release": "precise",
-     "version": "12.04",
+   "com.ubuntu.cloud:server:14.04:i386": {
+     "release": "trusty",
+     "version": "14.04",
      "arch": "i386",
      "versions": {
        "20121111": {
@@ -153,14 +158,14 @@ var imagesData = `
              "id": "33"
            }
          },
-         "pubname": "ubuntu-precise-12.04-i386-server-20121111",
+         "pubname": "ubuntu-trusty-14.04-i386-server-20121111",
          "label": "release"
        }
      }
    },
-   "com.ubuntu.cloud:server:12.04:ppc64el": {
-     "release": "precise",
-     "version": "12.04",
+   "com.ubuntu.cloud:server:14.04:ppc64el": {
+     "release": "trusty",
+     "version": "14.04",
      "arch": "ppc64el",
      "versions": {
        "20121111": {
@@ -172,7 +177,7 @@ var imagesData = `
              "id": "33"
            }
          },
-         "pubname": "ubuntu-precise-12.04-ppc64el-server-20121111",
+         "pubname": "ubuntu-trusty-14.04-ppc64el-server-20121111",
          "label": "release"
        }
      }
@@ -242,13 +247,13 @@ func UseTestImageData(stor storage.Storage, cred *identity.Credentials) {
 		panic(fmt.Errorf("cannot generate index metdata: %v", err))
 	}
 	data := metadata.Bytes()
-	stor.Put(simplestreams.DefaultIndexPath+".json", bytes.NewReader(data), int64(len(data)))
+	stor.Put(simplestreams.UnsignedIndex(imagemetadata.StreamsVersionV1), bytes.NewReader(data), int64(len(data)))
 	stor.Put(
 		productMetadatafile, strings.NewReader(imagesData), int64(len(imagesData)))
 }
 
 func RemoveTestImageData(stor storage.Storage) {
-	stor.Remove(simplestreams.DefaultIndexPath + ".json")
+	stor.Remove(simplestreams.UnsignedIndex("v1"))
 	stor.Remove(productMetadatafile)
 }
 
@@ -296,15 +301,15 @@ func SetUseFloatingIP(e environs.Environ, val bool) {
 	env.ecfg().attrs["use-floating-ip"] = val
 }
 
-func SetUpGlobalGroup(e environs.Environ, name string, statePort, apiPort int) (nova.SecurityGroup, error) {
-	return e.(*environ).setUpGlobalGroup(name, statePort, apiPort)
+func SetUpGlobalGroup(e environs.Environ, name string, apiPort int) (nova.SecurityGroup, error) {
+	return e.(*environ).setUpGlobalGroup(name, apiPort)
 }
 
 func EnsureGroup(e environs.Environ, name string, rules []nova.RuleInfo) (nova.SecurityGroup, error) {
 	return e.(*environ).ensureGroup(name, rules)
 }
 
-func CollectInstances(e environs.Environ, ids []instance.Id, out map[instance.Id]instance.Instance) []instance.Id {
+func CollectInstances(e environs.Environ, ids []instance.Id, out map[string]instance.Instance) []instance.Id {
 	return e.(*environ).collectInstances(ids, out)
 }
 
@@ -343,3 +348,5 @@ func ResolveNetwork(e environs.Environ, networkName string) (string, error) {
 
 var PortsToRuleInfo = portsToRuleInfo
 var RuleMatchesPortRange = ruleMatchesPortRange
+
+var MakeServiceURL = &makeServiceURL

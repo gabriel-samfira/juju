@@ -11,10 +11,10 @@ import (
 	"github.com/juju/loggo"
 	"launchpad.net/tomb"
 
+	apiwatcher "github.com/juju/juju/api/watcher"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/config"
 	"github.com/juju/juju/state"
-	apiwatcher "github.com/juju/juju/state/api/watcher"
 	"github.com/juju/juju/state/watcher"
 )
 
@@ -43,7 +43,7 @@ func WaitForEnviron(w apiwatcher.NotifyWatcher, st EnvironConfigGetter, dying <-
 			return nil, tomb.ErrDying
 		case _, ok := <-w.Changes():
 			if !ok {
-				return nil, watcher.MustErr(w)
+				return nil, watcher.EnsureErr(w)
 			}
 			config, err := st.EnvironConfig()
 			if err != nil {
@@ -104,7 +104,7 @@ func (obs *EnvironObserver) loop() error {
 			return nil
 		case _, ok := <-obs.environWatcher.Changes():
 			if !ok {
-				return watcher.MustErr(obs.environWatcher)
+				return watcher.EnsureErr(obs.environWatcher)
 			}
 		}
 		config, err := obs.st.EnvironConfig()

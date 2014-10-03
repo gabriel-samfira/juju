@@ -4,17 +4,26 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
+	"io/ioutil"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/juju/cmd"
+	"github.com/juju/errors"
+	"github.com/juju/names"
 	goyaml "gopkg.in/yaml.v1"
 	"launchpad.net/gnuflag"
 
 	"github.com/juju/juju/agent"
+	agenttools "github.com/juju/juju/agent/tools"
+	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/constraints"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/config"
@@ -22,22 +31,28 @@ import (
 	"github.com/juju/juju/mongo"
 	"github.com/juju/juju/network"
 	"github.com/juju/juju/state"
-	"github.com/juju/juju/state/api/params"
+	"github.com/juju/juju/state/toolstorage"
+	"github.com/juju/juju/utils/ssh"
+	"github.com/juju/juju/version"
 	"github.com/juju/juju/worker/peergrouper"
 )
 
 var (
 	agentInitializeState = agent.InitializeState
+	sshGenerateKey       = ssh.GenerateKey
+	stateStorage         = (*state.State).Storage
 	minSocketTimeout     = 1 * time.Minute
 )
 
 type BootstrapCommand struct {
 	cmd.CommandBase
 	AgentConf
-	EnvConfig   map[string]interface{}
-	Constraints constraints.Value
-	Hardware    instance.HardwareCharacteristics
-	InstanceId  string
+	EnvConfig        map[string]interface{}
+	Constraints      constraints.Value
+	Hardware         instance.HardwareCharacteristics
+	InstanceId       string
+	AdminUsername    string
+	ImageMetadataDir string
 }
 
 // Info returns a decription of the command.
@@ -54,6 +69,8 @@ func (c *BootstrapCommand) SetFlags(f *gnuflag.FlagSet) {
 	f.Var(constraints.ConstraintsValue{Target: &c.Constraints}, "constraints", "initial environment constraints (space-separated strings)")
 	f.Var(&c.Hardware, "hardware", "hardware characteristics (space-separated strings)")
 	f.StringVar(&c.InstanceId, "instance-id", "", "unique instance-id for bootstrap machine")
+	f.StringVar(&c.AdminUsername, "admin-user", "admin", "set the name for the juju admin user")
+	f.StringVar(&c.ImageMetadataDir, "image-metadata", "", "custom image metadata source dir")
 }
 
 // Init initializes the command for running.
@@ -63,6 +80,9 @@ func (c *BootstrapCommand) Init(args []string) error {
 	}
 	if c.InstanceId == "" {
 		return requiredError("instance-id")
+	}
+	if !names.IsValidUser(c.AdminUsername) {
+		return errors.Errorf("%q is not a valid username", c.AdminUsername)
 	}
 	return c.AgentConf.CheckArgs(args)
 }
@@ -106,9 +126,19 @@ func (c *BootstrapCommand) Run(_ *cmd.Context) error {
 		return err
 	}
 
-	// Create system-identity file
-	if err := agent.WriteSystemIdentityFile(agentConfig); err != nil {
-		return err
+	// Generate a private SSH key for the state servers, and add
+	// the public key to the environment config. We'll add the
+	// private key to StateServingInfo below.
+	privateKey, publicKey, err := sshGenerateKey(config.JujuSystemKey)
+	if err != nil {
+		return errors.Annotate(err, "failed to generate system key")
+	}
+	authorizedKeys := config.ConcatAuthKeys(envCfg.AuthorizedKeys(), publicKey)
+	envCfg, err = env.Config().Apply(map[string]interface{}{
+		config.AuthKeysConfig: authorizedKeys,
+	})
+	if err != nil {
+		return errors.Annotate(err, "failed to add public key to environment config")
 	}
 
 	// Generate a shared secret for the Mongo replica set, and write it out.
@@ -121,6 +151,7 @@ func (c *BootstrapCommand) Run(_ *cmd.Context) error {
 		return fmt.Errorf("bootstrap machine config has no state serving info")
 	}
 	info.SharedSecret = sharedSecret
+	info.SystemIdentity = privateKey
 	err = c.ChangeConfig(func(agentConfig agent.ConfigSetter) error {
 		agentConfig.SetStateServingInfo(info)
 		return nil
@@ -129,6 +160,11 @@ func (c *BootstrapCommand) Run(_ *cmd.Context) error {
 		return fmt.Errorf("cannot write agent config: %v", err)
 	}
 	agentConfig = c.CurrentConfig()
+
+	// Create system-identity file
+	if err := agent.WriteSystemIdentityFile(agentConfig); err != nil {
+		return err
+	}
 
 	if err := c.startMongo(addrs, agentConfig); err != nil {
 		return err
@@ -154,7 +190,9 @@ func (c *BootstrapCommand) Run(_ *cmd.Context) error {
 		// We shouldn't attempt to dial peers until we have some.
 		dialOpts.Direct = true
 
+		adminTag := names.NewLocalUserTag(c.AdminUsername)
 		st, m, stateErr = agentInitializeState(
+			adminTag,
 			agentConfig,
 			envCfg,
 			agent.BootstrapMachineConfig{
@@ -175,6 +213,18 @@ func (c *BootstrapCommand) Run(_ *cmd.Context) error {
 	}
 	defer st.Close()
 
+	// Populate the tools catalogue.
+	if err := c.populateTools(st, env); err != nil {
+		return err
+	}
+
+	// Add custom image metadata to environment storage.
+	if c.ImageMetadataDir != "" {
+		if err := c.storeCustomImageMetadata(stateStorage(st)); err != nil {
+			return err
+		}
+	}
+
 	// bootstrap machine always gets the vote
 	return m.SetHasVote(true)
 }
@@ -192,16 +242,22 @@ func newEnsureServerParams(agentConfig agent.Config) (mongo.EnsureServerParams, 
 		}
 	}
 
-	servingInfo, ok := agentConfig.StateServingInfo()
+	si, ok := agentConfig.StateServingInfo()
 	if !ok {
 		return mongo.EnsureServerParams{}, fmt.Errorf("agent config has no state serving info")
 	}
 
 	params := mongo.EnsureServerParams{
-		StateServingInfo: servingInfo,
-		DataDir:          agentConfig.DataDir(),
-		Namespace:        agentConfig.Value(agent.Namespace),
-		OplogSize:        oplogSize,
+		APIPort:        si.APIPort,
+		StatePort:      si.StatePort,
+		Cert:           si.Cert,
+		PrivateKey:     si.PrivateKey,
+		SharedSecret:   si.SharedSecret,
+		SystemIdentity: si.SystemIdentity,
+
+		DataDir:   agentConfig.DataDir(),
+		Namespace: agentConfig.Value(agent.Namespace),
+		OplogSize: oplogSize,
 	}
 	return params, nil
 }
@@ -251,6 +307,84 @@ func (c *BootstrapCommand) startMongo(addrs []network.Address, agentConfig agent
 	return maybeInitiateMongoServer(peergrouper.InitiateMongoParams{
 		DialInfo:       dialInfo,
 		MemberHostPort: peerHostPort,
+	})
+}
+
+// populateTools stores uploaded tools in provider storage
+// and updates the tools metadata.
+func (c *BootstrapCommand) populateTools(st *state.State, env environs.Environ) error {
+	agentConfig := c.CurrentConfig()
+	dataDir := agentConfig.DataDir()
+	tools, err := agenttools.ReadTools(dataDir, version.Current)
+	if err != nil {
+		return err
+	}
+
+	data, err := ioutil.ReadFile(filepath.Join(
+		agenttools.SharedToolsDir(dataDir, version.Current),
+		"tools.tar.gz",
+	))
+	if err != nil {
+		return err
+	}
+
+	storage, err := st.ToolsStorage()
+	if err != nil {
+		return err
+	}
+	defer storage.Close()
+
+	var toolsVersions []version.Binary
+	if strings.HasPrefix(tools.URL, "file://") {
+		// Tools were uploaded: clone for each series of the same OS.
+		osSeries := version.OSSupportedSeries(tools.Version.OS)
+		for _, series := range osSeries {
+			toolsVersion := tools.Version
+			toolsVersion.Series = series
+			toolsVersions = append(toolsVersions, toolsVersion)
+		}
+	} else {
+		// Tools were downloaded from an external source: don't clone.
+		toolsVersions = []version.Binary{tools.Version}
+	}
+
+	for _, toolsVersion := range toolsVersions {
+		metadata := toolstorage.Metadata{
+			Version: toolsVersion,
+			Size:    tools.Size,
+			SHA256:  tools.SHA256,
+		}
+		logger.Debugf("Adding tools: %v", toolsVersion)
+		if err := storage.AddTools(bytes.NewReader(data), metadata); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// storeCustomImageMetadata reads the custom image metadata from disk,
+// and stores the files in environment storage with the same relative
+// paths.
+func (c *BootstrapCommand) storeCustomImageMetadata(stor state.Storage) error {
+	logger.Debugf("storing custom image metadata from %q", c.ImageMetadataDir)
+	return filepath.Walk(c.ImageMetadataDir, func(abspath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		relpath, err := filepath.Rel(c.ImageMetadataDir, abspath)
+		if err != nil {
+			return err
+		}
+		f, err := os.Open(abspath)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		logger.Debugf("storing %q in environment storage (%d bytes)", relpath, info.Size())
+		return stor.Put(relpath, f, info.Size())
 	})
 }
 

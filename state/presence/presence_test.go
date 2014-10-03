@@ -8,9 +8,10 @@ import (
 	stdtesting "testing"
 	"time"
 
+	"github.com/juju/errors"
 	gitjujutesting "github.com/juju/testing"
+	gc "gopkg.in/check.v1"
 	"gopkg.in/mgo.v2"
-	gc "launchpad.net/gocheck"
 	"launchpad.net/tomb"
 
 	"github.com/juju/juju/state/presence"
@@ -88,7 +89,7 @@ func (s *PresenceSuite) TestErrAndDead(c *gc.C) {
 	w := presence.NewWatcher(s.presence)
 	defer w.Stop()
 
-	c.Assert(w.Err(), gc.Equals, tomb.ErrStillAlive)
+	c.Assert(errors.Cause(w.Err()), gc.Equals, tomb.ErrStillAlive)
 	select {
 	case <-w.Dead():
 		c.Fatalf("Dead channel fired unexpectedly")

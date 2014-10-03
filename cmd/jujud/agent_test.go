@@ -15,20 +15,20 @@ import (
 	gitjujutesting "github.com/juju/testing"
 	jc "github.com/juju/testing/checkers"
 	"github.com/juju/utils"
-	gc "launchpad.net/gocheck"
+	gc "gopkg.in/check.v1"
 
 	"github.com/juju/juju/agent"
 	agenttools "github.com/juju/juju/agent/tools"
-	"github.com/juju/juju/environmentserver/authentication"
+	"github.com/juju/juju/api"
+	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/environs"
+	"github.com/juju/juju/environs/filestorage"
 	envtesting "github.com/juju/juju/environs/testing"
 	envtools "github.com/juju/juju/environs/tools"
 	"github.com/juju/juju/juju/testing"
 	"github.com/juju/juju/mongo"
 	"github.com/juju/juju/network"
 	"github.com/juju/juju/state"
-	"github.com/juju/juju/state/api"
-	"github.com/juju/juju/state/api/params"
 	coretesting "github.com/juju/juju/testing"
 	coretools "github.com/juju/juju/tools"
 	"github.com/juju/juju/version"
@@ -287,14 +287,32 @@ func (s *agentSuite) TearDownSuite(c *gc.C) {
 	worker.RestartDelay = s.oldRestartDelay
 }
 
+func (s *agentSuite) SetUpTest(c *gc.C) {
+	s.JujuConnSuite.SetUpTest(c)
+	// The standard jujud setupLogging replaces the default logger with one
+	// that uses a lumberjack rolling log file.  We want to make sure that all
+	// logging information from the agents when run through the tests continue
+	// to have the logging information available in the gocheck test logs, so
+	// we mock it out here.
+	s.PatchValue(&setupLogging, func(conf agent.Config) error { return nil })
+	// Set API host ports so FindTools/Tools API calls succeed.
+	hostPorts := [][]network.HostPort{{{
+		Address: network.NewAddress("0.1.2.3", network.ScopeUnknown),
+		Port:    1234,
+	}}}
+	err := s.State.SetAPIHostPorts(hostPorts)
+	c.Assert(err, gc.IsNil)
+}
+
 // primeAgent writes the configuration file and tools with version vers
 // for an agent with the given entity name.  It returns the agent's
 // configuration and the current tools.
 func (s *agentSuite) primeAgent(c *gc.C, tag names.Tag, password string, vers version.Binary) (agent.ConfigSetterWriter, *coretools.Tools) {
-	stor := s.Environ.Storage()
-	agentTools := envtesting.PrimeTools(c, stor, s.DataDir(), vers)
-	err := envtools.MergeAndWriteMetadata(stor, coretools.List{agentTools}, envtools.DoNotWriteMirrors)
+	logger.Debugf("priming agent %s", tag.String())
+	stor, err := filestorage.NewFileStorageWriter(c.MkDir())
 	c.Assert(err, gc.IsNil)
+	agentTools := envtesting.PrimeTools(c, stor, s.DataDir(), vers)
+	err = envtools.MergeAndWriteMetadata(stor, "released", coretools.List{agentTools}, envtools.DoNotWriteMirrors)
 	tools1, err := agenttools.ChangeAgentTools(s.DataDir(), tag.String(), vers)
 	c.Assert(err, gc.IsNil)
 	c.Assert(tools1, gc.DeepEquals, agentTools)
@@ -327,6 +345,8 @@ func (s *agentSuite) primeAPIHostPorts(c *gc.C) {
 
 	err = s.State.SetAPIHostPorts([][]network.HostPort{{hostPort}})
 	c.Assert(err, gc.IsNil)
+
+	logger.Debugf("api host ports primed %#v", hostPort)
 }
 
 func parseHostPort(s string) (network.HostPort, error) {
@@ -344,7 +364,7 @@ func parseHostPort(s string) (network.HostPort, error) {
 }
 
 // writeStateAgentConfig creates and writes a state agent config.
-func writeStateAgentConfig(c *gc.C, stateInfo *authentication.MongoInfo, dataDir string, tag names.Tag, password string, vers version.Binary) agent.ConfigSetterWriter {
+func writeStateAgentConfig(c *gc.C, stateInfo *mongo.MongoInfo, dataDir string, tag names.Tag, password string, vers version.Binary) agent.ConfigSetterWriter {
 	port := gitjujutesting.FindTCPPort()
 	apiAddr := []string{fmt.Sprintf("localhost:%d", port)}
 	conf, err := agent.NewStateMachineConfig(
@@ -376,7 +396,9 @@ func writeStateAgentConfig(c *gc.C, stateInfo *authentication.MongoInfo, dataDir
 func (s *agentSuite) primeStateAgent(
 	c *gc.C, tag names.Tag, password string, vers version.Binary) (agent.ConfigSetterWriter, *coretools.Tools) {
 
-	agentTools := envtesting.PrimeTools(c, s.Environ.Storage(), s.DataDir(), vers)
+	stor, err := filestorage.NewFileStorageWriter(c.MkDir())
+	c.Assert(err, gc.IsNil)
+	agentTools := envtesting.PrimeTools(c, stor, s.DataDir(), vers)
 	tools1, err := agenttools.ChangeAgentTools(s.DataDir(), tag.String(), vers)
 	c.Assert(err, gc.IsNil)
 	c.Assert(tools1, gc.DeepEquals, agentTools)

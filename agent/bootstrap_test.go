@@ -8,11 +8,11 @@ import (
 	gitjujutesting "github.com/juju/testing"
 	jc "github.com/juju/testing/checkers"
 	"github.com/juju/utils"
-	gc "launchpad.net/gocheck"
+	gc "gopkg.in/check.v1"
 
 	"github.com/juju/juju/agent"
+	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/constraints"
-	"github.com/juju/juju/environmentserver/authentication"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/config"
 	"github.com/juju/juju/instance"
@@ -20,7 +20,6 @@ import (
 	"github.com/juju/juju/network"
 	"github.com/juju/juju/provider/dummy"
 	"github.com/juju/juju/state"
-	"github.com/juju/juju/state/api/params"
 	"github.com/juju/juju/testing"
 	"github.com/juju/juju/version"
 )
@@ -88,16 +87,24 @@ func (s *bootstrapSuite) TestInitializeState(c *gc.C) {
 	envCfg, err := config.New(config.NoDefaults, envAttrs)
 	c.Assert(err, gc.IsNil)
 
-	st, m, err := agent.InitializeState(cfg, envCfg, mcfg, mongo.DialOpts{}, environs.NewStatePolicy())
+	adminUser := names.NewLocalUserTag("agent-admin")
+	st, m, err := agent.InitializeState(adminUser, cfg, envCfg, mcfg, mongo.DialOpts{}, environs.NewStatePolicy())
 	c.Assert(err, gc.IsNil)
 	defer st.Close()
 
 	err = cfg.Write()
 	c.Assert(err, gc.IsNil)
 
+	// Check that the environment has been set up.
+	env, err := st.Environment()
+	c.Assert(err, gc.IsNil)
+	uuid, ok := envCfg.UUID()
+	c.Assert(ok, jc.IsTrue)
+	c.Assert(env.UUID(), gc.Equals, uuid)
+
 	// Check that initial admin user has been set up correctly.
 	s.assertCanLogInAsAdmin(c, pwHash)
-	user, err := st.User("admin")
+	user, err := st.User(env.Owner())
 	c.Assert(err, gc.IsNil)
 	c.Assert(user.PasswordValid(testing.DefaultMongoPassword), jc.IsTrue)
 
@@ -134,7 +141,7 @@ func (s *bootstrapSuite) TestInitializeState(c *gc.C) {
 	// Check that the state serving info is initialised correctly.
 	stateServingInfo, err := st.StateServingInfo()
 	c.Assert(err, gc.IsNil)
-	c.Assert(stateServingInfo, jc.DeepEquals, params.StateServingInfo{
+	c.Assert(stateServingInfo, jc.DeepEquals, state.StateServingInfo{
 		APIPort:        1234,
 		StatePort:      s.mgoInst.Port(),
 		Cert:           testing.ServerCert,
@@ -173,7 +180,8 @@ func (s *bootstrapSuite) TestInitializeStateWithStateServingInfoNotAvailable(c *
 	_, available := cfg.StateServingInfo()
 	c.Assert(available, gc.Equals, false)
 
-	_, _, err = agent.InitializeState(cfg, nil, agent.BootstrapMachineConfig{}, mongo.DialOpts{}, environs.NewStatePolicy())
+	adminUser := names.NewLocalUserTag("agent-admin")
+	_, _, err = agent.InitializeState(adminUser, cfg, nil, agent.BootstrapMachineConfig{}, mongo.DialOpts{}, environs.NewStatePolicy())
 	// InitializeState will fail attempting to get the api port information
 	c.Assert(err, gc.ErrorMatches, "state serving information not available")
 }
@@ -215,18 +223,48 @@ func (s *bootstrapSuite) TestInitializeStateFailsSecondTime(c *gc.C) {
 	envCfg, err := config.New(config.NoDefaults, envAttrs)
 	c.Assert(err, gc.IsNil)
 
-	st, _, err := agent.InitializeState(cfg, envCfg, mcfg, mongo.DialOpts{}, environs.NewStatePolicy())
+	adminUser := names.NewLocalUserTag("agent-admin")
+	st, _, err := agent.InitializeState(adminUser, cfg, envCfg, mcfg, mongo.DialOpts{}, environs.NewStatePolicy())
 	c.Assert(err, gc.IsNil)
+	st.Close()
 
-	st, _, err = agent.InitializeState(cfg, envCfg, mcfg, mongo.DialOpts{}, environs.NewStatePolicy())
+	st, _, err = agent.InitializeState(adminUser, cfg, envCfg, mcfg, mongo.DialOpts{}, environs.NewStatePolicy())
 	if err == nil {
 		st.Close()
 	}
 	c.Assert(err, gc.ErrorMatches, "failed to initialize mongo admin user: cannot set admin password: not authorized .*")
 }
 
+func (s *bootstrapSuite) TestMachineJobFromParams(c *gc.C) {
+	var tests = []struct {
+		name params.MachineJob
+		want state.MachineJob
+		err  string
+	}{{
+		name: params.JobHostUnits,
+		want: state.JobHostUnits,
+	}, {
+		name: params.JobManageEnviron,
+		want: state.JobManageEnviron,
+	}, {
+		name: params.JobManageStateDeprecated,
+		want: state.JobManageStateDeprecated,
+	}, {
+		name: "invalid",
+		want: -1,
+		err:  `invalid machine job "invalid"`,
+	}}
+	for _, test := range tests {
+		got, err := agent.MachineJobFromParams(test.name)
+		if err != nil {
+			c.Check(err, gc.ErrorMatches, test.err)
+		}
+		c.Check(got, gc.Equals, test.want)
+	}
+}
+
 func (s *bootstrapSuite) assertCanLogInAsAdmin(c *gc.C, password string) {
-	info := &authentication.MongoInfo{
+	info := &mongo.MongoInfo{
 		Info: mongo.Info{
 			Addrs:  []string{s.mgoInst.Addr()},
 			CACert: testing.CACert,

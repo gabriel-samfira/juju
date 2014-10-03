@@ -17,6 +17,7 @@ import (
 	"github.com/juju/utils/set"
 	"launchpad.net/gwacl"
 
+	"github.com/juju/juju/apiserver/params"
 	"github.com/juju/juju/constraints"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/config"
@@ -24,12 +25,10 @@ import (
 	"github.com/juju/juju/environs/instances"
 	"github.com/juju/juju/environs/simplestreams"
 	"github.com/juju/juju/environs/storage"
-	envtools "github.com/juju/juju/environs/tools"
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/network"
 	"github.com/juju/juju/provider/common"
 	"github.com/juju/juju/state"
-	"github.com/juju/juju/state/api/params"
 )
 
 const (
@@ -85,8 +84,6 @@ type azureEnviron struct {
 // azureEnviron implements Environ and HasRegion.
 var _ environs.Environ = (*azureEnviron)(nil)
 var _ simplestreams.HasRegion = (*azureEnviron)(nil)
-var _ imagemetadata.SupportsCustomSources = (*azureEnviron)(nil)
-var _ envtools.SupportsCustomSources = (*azureEnviron)(nil)
 var _ state.Prechecker = (*azureEnviron)(nil)
 
 // NewEnviron creates a new azureEnviron.
@@ -778,10 +775,6 @@ func (env *azureEnviron) newOSDisk(sourceImageName string) *gwacl.OSVirtualHardD
 // getInitialEndpoints returns a slice of the endpoints every instance should have open
 // (ssh port, etc).
 func (env *azureEnviron) getInitialEndpoints(stateServer bool) []gwacl.InputEndpoint {
-	// TODO(axw) either proxy ssh traffic through one of the
-	// randomly chosen VMs to the internal address, or otherwise
-	// don't load balance SSH and provide a way of getting the
-	// local port.
 	cfg := env.Config()
 	endpoints := []gwacl.InputEndpoint{{
 		LocalPort: 22,
@@ -791,11 +784,6 @@ func (env *azureEnviron) getInitialEndpoints(stateServer bool) []gwacl.InputEndp
 	}}
 	if stateServer {
 		endpoints = append(endpoints, []gwacl.InputEndpoint{{
-			LocalPort: cfg.StatePort(),
-			Port:      cfg.StatePort(),
-			Protocol:  "tcp",
-			Name:      "stateport",
-		}, {
 			LocalPort: cfg.APIPort(),
 			Port:      cfg.APIPort(),
 			Protocol:  "tcp",
@@ -1275,38 +1263,6 @@ func (env *azureEnviron) getStorageContext() (*gwacl.StorageContext, error) {
 		RetryPolicy:   retryPolicy,
 	}
 	return &context, nil
-}
-
-// baseURLs specifies an Azure specific location where we look for simplestreams information.
-// It contains the central databases for the released and daily streams, but this may
-// become more configurable.  This variable is here as a placeholder, but also
-// as an injection point for tests.
-var baseURLs = []string{}
-
-// GetImageSources returns a list of sources which are used to search for simplestreams image metadata.
-func (env *azureEnviron) GetImageSources() ([]simplestreams.DataSource, error) {
-	sources := make([]simplestreams.DataSource, 1+len(baseURLs))
-	sources[0] = storage.NewStorageSimpleStreamsDataSource("cloud storage", env.Storage(), storage.BaseImagesPath)
-	for i, url := range baseURLs {
-		sources[i+1] = simplestreams.NewURLDataSource("Azure base URL", url, utils.VerifySSLHostnames)
-	}
-	return sources, nil
-}
-
-// GetToolsSources returns a list of sources which are used to search for simplestreams tools metadata.
-func (env *azureEnviron) GetToolsSources() ([]simplestreams.DataSource, error) {
-	// Add the simplestreams source off the control bucket.
-	sources := []simplestreams.DataSource{
-		storage.NewStorageSimpleStreamsDataSource("cloud storage", env.Storage(), storage.BaseToolsPath)}
-	return sources, nil
-}
-
-// getImageMetadataSigningRequired returns whether this environment requires
-// image metadata from Simplestreams to be signed.
-func (env *azureEnviron) getImageMetadataSigningRequired() bool {
-	// Hard-coded to true for now.  Once we support custom base URLs,
-	// this may have to change.
-	return true
 }
 
 // Region is specified in the HasRegion interface.

@@ -14,6 +14,7 @@ import (
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/network"
 	"github.com/juju/juju/state"
+	"github.com/juju/juju/tools"
 )
 
 // A EnvironProvider represents a computing and storage provider.
@@ -52,7 +53,7 @@ type EnvironProvider interface {
 	SecretAttrs(cfg *config.Config) (map[string]string, error)
 }
 
-// EnvironStorage implements storage access for an environment
+// EnvironStorage implements storage access for an environment.
 type EnvironStorage interface {
 	// Storage returns storage specific to the environment.
 	Storage() storage.Storage
@@ -75,6 +76,10 @@ type BootstrapParams struct {
 	// Placement, if non-empty, holds an environment-specific placement
 	// directive used to choose the initial instance.
 	Placement string
+
+	// AvailableTools is a collection of tools which the Bootstrap method
+	// may use to decide which architecture/series to instantiate.
+	AvailableTools tools.List
 }
 
 // BootstrapFinalizer is a function returned from Environ.Bootstrap.
@@ -150,8 +155,6 @@ type Environ interface {
 	// to Juju state servers. If there are no state server instances,
 	// ErrNotBootstrapped is returned.
 	StateServerInstances() ([]instance.Id, error)
-
-	EnvironStorage
 
 	// Destroy shuts down all known machines and destroys the
 	// rest of the environment. Note that on some providers,

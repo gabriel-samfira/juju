@@ -7,16 +7,18 @@ import (
 	"github.com/juju/errors"
 	"github.com/juju/utils"
 
+	"github.com/juju/juju/api"
 	"github.com/juju/juju/environs/storage"
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/network"
 	"github.com/juju/juju/state"
-	"github.com/juju/juju/state/api"
 )
 
-// GetStorage creates an Environ from the config in state and returns
-// its storage interface.
-func GetStorage(st *state.State) (storage.Storage, error) {
+// LegacyStorage creates an Environ from the config in state and returns
+// its provider storage interface if it supports one. If the environment
+// does not support provider storage, then it will return an error
+// satisfying errors.IsNotSupported.
+func LegacyStorage(st *state.State) (storage.Storage, error) {
 	envConfig, err := st.EnvironConfig()
 	if err != nil {
 		return nil, fmt.Errorf("cannot get environment config: %v", err)
@@ -25,7 +27,11 @@ func GetStorage(st *state.State) (storage.Storage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot access environment: %v", err)
 	}
-	return env.Storage(), nil
+	if env, ok := env.(EnvironStorage); ok {
+		return env.Storage(), nil
+	}
+	errmsg := fmt.Sprintf("%s provider does not support provider storage", envConfig.Type())
+	return nil, errors.NewNotSupported(nil, errmsg)
 }
 
 var longAttempt = utils.AttemptStrategy{
