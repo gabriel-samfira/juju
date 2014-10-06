@@ -42,6 +42,8 @@ func osVal(series string, valname osVarType) (string, error) {
 		return winVals[valname], nil
 	case version.Ubuntu:
 		return linuxVals[valname], nil
+	case version.OSX:
+		return linuxVals[valname], nil
 	}
 	return "", fmt.Errorf("Unknown OS: %q", os)
 }
