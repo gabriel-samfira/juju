@@ -40,7 +40,7 @@ func osVal(series string, valname osVarType) (string, error) {
 	switch os {
 	case version.Windows:
 		return winVals[valname], nil
-	case version.Ubuntu:
+	default:
 		return linuxVals[valname], nil
 	case version.OSX:
 		return linuxVals[valname], nil
