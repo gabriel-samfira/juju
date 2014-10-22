@@ -47,6 +47,7 @@ func getVersionFromRegistry() (string, error) {
 
 func osVersion() (string, error) {
 	ver, err := getVersionFromRegistry()
+    logger.Infof("Got version from registry: %v", ver)    
 	if err != nil {
 		return "unknown", err
 	}
