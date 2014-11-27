@@ -439,6 +439,7 @@ func (h *charmsHandler) downloadCharm(curl *charm.URL, charmArchivePath string) 
 		defer os.Remove(tempCharmArchive.Name())
 		return errors.Annotate(err, "error processing charm archive download")
 	}
+	tempCharmArchive.Close()
 	if err = os.Rename(tempCharmArchive.Name(), charmArchivePath); err != nil {
 		defer os.Remove(tempCharmArchive.Name())
 		return errors.Annotate(err, "error renaming the charm archive")
