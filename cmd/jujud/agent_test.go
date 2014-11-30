@@ -26,6 +26,7 @@ import (
 	"github.com/juju/juju/environs/filestorage"
 	envtesting "github.com/juju/juju/environs/testing"
 	envtools "github.com/juju/juju/environs/tools"
+	"github.com/juju/juju/juju/paths"
 	"github.com/juju/juju/juju/testing"
 	"github.com/juju/juju/mongo"
 	"github.com/juju/juju/network"
@@ -223,7 +224,9 @@ type acCreator func() (cmd.Command, *AgentConf)
 func CheckAgentCommand(c *gc.C, create acCreator, args []string) cmd.Command {
 	com, conf := create()
 	err := coretesting.InitCommand(com, args)
-	c.Assert(conf.dataDir, gc.Equals, "/var/lib/juju")
+	dataDir, err := paths.DataDir(version.Current.Series)
+	c.Assert(err, gc.IsNil)
+	c.Assert(conf.dataDir, gc.Equals, dataDir)
 	badArgs := append(args, "--data-dir", "")
 	com, conf = create()
 	err = coretesting.InitCommand(com, badArgs)
