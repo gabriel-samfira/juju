@@ -41,6 +41,9 @@ import (
 )
 
 func Test(t *stdtesting.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("No point in testing for LXC on windows")
+	}
 	gc.TestingT(t)
 }
 
