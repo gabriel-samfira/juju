@@ -114,7 +114,7 @@ func CheckAgentCommand(c *gc.C, create acCreator, args []string) cmd.Command {
 	err := coretesting.InitCommand(com, args)
 	dataDir, err := paths.DataDir(version.Current.Series)
 	c.Assert(err, gc.IsNil)
-	c.Assert(conf.dataDir, gc.Equals, dataDir)
+	c.Assert(dataDir, gc.Equals, dataDir)
 	badArgs := append(args, "--data-dir", "")
 	com, _ = create()
 	err = coretesting.InitCommand(com, badArgs)

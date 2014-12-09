@@ -10,12 +10,13 @@ import (
 )
 
 var rebootBin = "shutdown.exe"
+var rebootTime = "15"
 
 func (s *RebootSuite) rebootCommandParams(c *gc.C) []string {
 	return []string{
 		"-r",
 		"-t",
-		"15",
+		rebootTime,
 	}
 }
 
@@ -23,7 +24,7 @@ func (s *RebootSuite) shutdownCommandParams(c *gc.C) []string {
 	return []string{
 		"-s",
 		"-t",
-		"15",
+		rebootTime,
 	}
 }
 

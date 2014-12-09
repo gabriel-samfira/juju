@@ -260,7 +260,7 @@ var argsTests = []struct {
 
 func (s *JujuCMainSuite) TestArgs(c *gc.C) {
 	if runtime.GOOS == "windows" {
-		c.Skip("test panics on CryptAcquireContext")
+		c.Skip("issue 1403084: test panics on CryptAcquireContext on windows")
 	}
 	for _, t := range argsTests {
 		c.Log(t.args)
@@ -271,7 +271,7 @@ func (s *JujuCMainSuite) TestArgs(c *gc.C) {
 
 func (s *JujuCMainSuite) TestNoClientId(c *gc.C) {
 	if runtime.GOOS == "windows" {
-		c.Skip("test panics on CryptAcquireContext")
+		c.Skip("issue 1403084: test panics on CryptAcquireContext on windows")
 	}
 	output := run(c, s.sockPath, "", 1, "remote")
 	c.Assert(output, gc.Equals, "error: JUJU_CONTEXT_ID not set\n")
@@ -279,7 +279,7 @@ func (s *JujuCMainSuite) TestNoClientId(c *gc.C) {
 
 func (s *JujuCMainSuite) TestBadClientId(c *gc.C) {
 	if runtime.GOOS == "windows" {
-		c.Skip("test panics on CryptAcquireContext")
+		c.Skip("issue 1403084: test panics on CryptAcquireContext on windows")
 	}
 	output := run(c, s.sockPath, "ben", 1, "remote")
 	c.Assert(output, gc.Equals, "error: bad request: bad context: ben\n")
@@ -287,7 +287,7 @@ func (s *JujuCMainSuite) TestBadClientId(c *gc.C) {
 
 func (s *JujuCMainSuite) TestNoSockPath(c *gc.C) {
 	if runtime.GOOS == "windows" {
-		c.Skip("test panics on CryptAcquireContext")
+		c.Skip("issue 1403084: test panics on CryptAcquireContext on windows")
 	}
 	output := run(c, "", "bill", 1, "remote")
 	c.Assert(output, gc.Equals, "error: JUJU_AGENT_SOCKET not set\n")
@@ -295,7 +295,7 @@ func (s *JujuCMainSuite) TestNoSockPath(c *gc.C) {
 
 func (s *JujuCMainSuite) TestBadSockPath(c *gc.C) {
 	if runtime.GOOS == "windows" {
-		c.Skip("test panics on CryptAcquireContext")
+		c.Skip("issue 1403084: test panics on CryptAcquireContext on windows")
 	}
 	badSock := filepath.Join(c.MkDir(), "bad.sock")
 	output := run(c, badSock, "bill", 1, "remote")
