@@ -21,11 +21,11 @@ import (
 	coretesting "github.com/juju/juju/testing"
 )
 
-func Test(t *testing.T) { 
+func Test(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Skipping upstart tests on windows")
 	}
-	gc.TestingT(t) 
+	gc.TestingT(t)
 }
 
 type UpstartSuite struct {
