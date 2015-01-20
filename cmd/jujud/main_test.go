@@ -24,7 +24,6 @@ import (
 	agentcmd "github.com/juju/juju/cmd/jujud/agent"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/juju/names"
-	jujunames "github.com/juju/juju/juju/names"
 	coretesting "github.com/juju/juju/testing"
 	"github.com/juju/juju/worker/deployer"
 	"github.com/juju/juju/worker/uniter/runner/jujuc"
@@ -90,7 +89,7 @@ func TestRunMain(t *stdtesting.T) {
 }
 
 func checkMessage(c *gc.C, msg string, cmd ...string) {
-	args := append([]string{"-test.run", "TestRunMain", "-run-main", "--", jujunames.Jujud}, cmd...)
+	args := append([]string{"-test.run", "TestRunMain", "-run-main", "--", names.Jujud}, cmd...)
 	c.Logf("check %#v", args)
 	ps := exec.Command(os.Args[0], args...)
 	output, err := ps.CombinedOutput()
@@ -102,7 +101,7 @@ func checkMessage(c *gc.C, msg string, cmd ...string) {
 
 func (s *MainSuite) TestParseErrors(c *gc.C) {
 	// Check all the obvious parse errors
-	checkMessage(c, fmt.Sprintf("unrecognized command: %s cavitate", names.Jujud), "cavitate")
+	checkMessage(c, "unrecognized command: jujud cavitate", "cavitate")
 	msgf := "flag provided but not defined: --cheese"
 	checkMessage(c, msgf, "--cheese", "cavitate")
 

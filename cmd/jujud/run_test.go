@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -199,16 +198,15 @@ func (s *RunTestSuite) TestNoContextWithLock(c *gc.C) {
 }
 
 func (s *RunTestSuite) TestMissingSocket(c *gc.C) {
+	if runtime.GOOS == "windows" {
+		c.Skip("Current implementation of named pipes loops if the socket is missing")
+	}
 	agentDir := filepath.Join(cmdutil.DataDir, "agents", "unit-foo-1")
 	err := os.MkdirAll(agentDir, 0755)
 	c.Assert(err, jc.ErrorIsNil)
 
 	_, err = testing.RunCommand(c, &RunCommand{}, "foo/1", "bar")
-	if runtime.GOOS == "windows" {
-		c.Assert(err, gc.ErrorMatches, regexp.QuoteMeta(`GetFileAttributesEx \\.\pipe\unit-foo-1-run: The system cannot find the file specified.`))
-	} else {
-		c.Assert(err, gc.ErrorMatches, `dial unix .*/run.socket: `+utils.NoSuchFileErrRegexp)
-	}
+	c.Assert(err, gc.ErrorMatches, `dial unix .*/run.socket: `+utils.NoSuchFileErrRegexp)
 }
 
 func (s *RunTestSuite) TestRunning(c *gc.C) {
@@ -224,9 +222,9 @@ func (s *RunTestSuite) TestRunning(c *gc.C) {
 
 func (s *RunTestSuite) TestRunningRelation(c *gc.C) {
 	loggo.GetLogger("worker.uniter").SetLogLevel(loggo.TRACE)
-	s.runListenerForAgent(c, "unit-foo-2")
+	s.runListenerForAgent(c, "unit-foo-1")
 
-	ctx, err := testing.RunCommand(c, &RunCommand{}, "--relation", "db:1", "foo/2", "bar")
+	ctx, err := testing.RunCommand(c, &RunCommand{}, "--relation", "db:1", "foo/1", "bar")
 	c.Check(cmd.IsRcPassthroughError(err), jc.IsTrue)
 	c.Assert(err, gc.ErrorMatches, "subprocess encountered error code 42")
 	c.Assert(testing.Stdout(ctx), gc.Equals, "bar stdout")
@@ -235,27 +233,27 @@ func (s *RunTestSuite) TestRunningRelation(c *gc.C) {
 
 func (s *RunTestSuite) TestRunningBadRelation(c *gc.C) {
 	loggo.GetLogger("worker.uniter").SetLogLevel(loggo.TRACE)
-	s.runListenerForAgent(c, "unit-foo-3")
+	s.runListenerForAgent(c, "unit-foo-1")
 
-	_, err := testing.RunCommand(c, &RunCommand{}, "--relation", "badrelation:W", "foo/3", "bar")
+	_, err := testing.RunCommand(c, &RunCommand{}, "--relation", "badrelation:W", "foo/1", "bar")
 	c.Check(cmd.IsRcPassthroughError(err), jc.IsFalse)
 	c.Assert(err, gc.ErrorMatches, "invalid relation id")
 }
 
 func (s *RunTestSuite) TestRunningRemoteUnitNoRelation(c *gc.C) {
 	loggo.GetLogger("worker.uniter").SetLogLevel(loggo.TRACE)
-	s.runListenerForAgent(c, "unit-foo-4")
+	s.runListenerForAgent(c, "unit-foo-1")
 
-	_, err := testing.RunCommand(c, &RunCommand{}, "--remote-unit", "remote/0", "foo/4", "bar")
+	_, err := testing.RunCommand(c, &RunCommand{}, "--remote-unit", "remote/0", "foo/1", "bar")
 	c.Check(cmd.IsRcPassthroughError(err), jc.IsFalse)
 	c.Assert(err, gc.ErrorMatches, "remote unit: remote/0, provided without a relation")
 }
 
 func (s *RunTestSuite) TestSkipCheckAndRemoteUnit(c *gc.C) {
 	loggo.GetLogger("worker.uniter").SetLogLevel(loggo.TRACE)
-	s.runListenerForAgent(c, "unit-foo-5")
+	s.runListenerForAgent(c, "unit-foo-1")
 
-	ctx, err := testing.RunCommand(c, &RunCommand{}, "--force-remote-unit", "--remote-unit", "unit-name-2", "--relation", "db:1", "foo/5", "bar")
+	ctx, err := testing.RunCommand(c, &RunCommand{}, "--force-remote-unit", "--remote-unit", "unit-name-2", "--relation", "db:1", "foo/1", "bar")
 	c.Check(cmd.IsRcPassthroughError(err), jc.IsTrue)
 	c.Assert(err, gc.ErrorMatches, "subprocess encountered error code 42")
 	c.Assert(testing.Stdout(ctx), gc.Equals, "bar stdout")

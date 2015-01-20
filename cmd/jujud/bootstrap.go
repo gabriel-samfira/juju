@@ -357,8 +357,9 @@ func (c *BootstrapCommand) storeCustomImageMetadata(stor storage.Storage) error 
 			return err
 		}
 		defer f.Close()
+		relpath = filepath.ToSlash(relpath)
 		logger.Debugf("storing %q in environment storage (%d bytes)", relpath, info.Size())
-		return stor.Put(filepath.ToSlash(relpath), f, info.Size())
+		return stor.Put(relpath, f, info.Size())
 	})
 }
 
