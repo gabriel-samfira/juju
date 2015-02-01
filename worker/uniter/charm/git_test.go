@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	jc "github.com/juju/testing/checkers"
 	gc "gopkg.in/check.v1"
@@ -24,6 +25,12 @@ type GitDirSuite struct {
 }
 
 var _ = gc.Suite(&GitDirSuite{})
+
+func (s *GitDirSuite) SetUpTest(c *gc.C) {
+	if runtime.GOOS == "windows" {
+		c.Skip("Skipping git tests on windows")
+	}
+}
 
 func (s *GitDirSuite) TestInitConfig(c *gc.C) {
 	base := c.MkDir()
