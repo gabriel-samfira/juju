@@ -4,7 +4,7 @@
 package storage
 
 import (
-	"path/filepath"
+	"path"
 
 	"github.com/juju/errors"
 )
@@ -22,13 +22,13 @@ const (
 func BlockDevicePath(device BlockDevice) (string, error) {
 	// Labels must be unique, and are short, so prefer them over UUID.
 	if device.Label != "" {
-		return filepath.Join(diskByLabel, device.Label), nil
+		return path.Join(diskByLabel, device.Label), nil
 	}
 	if device.UUID != "" {
-		return filepath.Join(diskByUUID, device.UUID), nil
+		return path.Join(diskByUUID, device.UUID), nil
 	}
 	if device.DeviceName != "" {
-		return filepath.Join("/dev", device.DeviceName), nil
+		return path.Join("/dev", device.DeviceName), nil
 	}
 	return "", errors.Errorf("could not determine path for block device %q", device.Name)
 }
