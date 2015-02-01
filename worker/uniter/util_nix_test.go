@@ -13,6 +13,8 @@ import (
 	gc "gopkg.in/check.v1"
 )
 
+var uniterRelationsCustomizeScript = "relation-ids db > relations.out && chmod 644 relations.out"
+
 var cmdSuffix = ""
 
 var goodHook = `

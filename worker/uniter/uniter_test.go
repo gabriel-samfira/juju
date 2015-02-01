@@ -1048,7 +1048,7 @@ func (s *UniterSuite) TestUniterRelations(c *gc.C) {
 			"all relations are available to config-changed on bounce, even if state dir is missing",
 			createCharm{
 				customize: func(c *gc.C, ctx *context, path string) {
-					script := "relation-ids db > relations.out && chmod 644 relations.out"
+					script := uniterRelationsCustomizeScript
 					appendHook(c, path, "config-changed", script)
 				},
 			},

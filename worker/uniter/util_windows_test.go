@@ -13,6 +13,8 @@ import (
 	gc "gopkg.in/check.v1"
 )
 
+var uniterRelationsCustomizeScript = "relation-ids.exe db > relations.out"
+
 var cmdSuffix = ".cmd"
 
 var goodHook = `
@@ -90,7 +92,7 @@ func (s *UniterSuite) TestRunCommand(c *gc.C) {
 			"run commands: environment",
 			quickStart{},
 			runCommands{echoUnitNameToFile("run.output")},
-			verifyFile{filepath.Join(testDir, "run.output"), "juju run u/0\n"},
+			verifyFile{filepath.Join(testDir, "run.output"), "juju run u/0\r\n"},
 		), ut(
 			"run commands: jujuc commands",
 			quickStartRelation{},
@@ -101,7 +103,7 @@ func (s *UniterSuite) TestRunCommand(c *gc.C) {
 			},
 			verifyFile{
 				testFile("jujuc.output"),
-				adminTag.String() + "\nprivate.address.example.com\npublic.address.example.com\n",
+				adminTag.String() + "\r\nprivate.address.example.com\r\npublic.address.example.com\r\n",
 			},
 		), ut(
 			"run commands: jujuc environment",
@@ -112,7 +114,7 @@ func (s *UniterSuite) TestRunCommand(c *gc.C) {
 			},
 			verifyFile{
 				testFile("jujuc-env.output"),
-				"db:0\nmysql/0\n",
+				"db:0\r\nmysql/0\r\n",
 			},
 		), ut(
 			"run commands: proxy settings set",
@@ -130,12 +132,12 @@ func (s *UniterSuite) TestRunCommand(c *gc.C) {
 			},
 			verifyFile{
 				testFile("proxy.output"),
-				"http\nhttp\nhttps\nhttps\nftp\nftp\nlocalhost\nlocalhost\n",
+				"http\r\nhttp\r\nhttps\r\nhttps\r\nftp\r\nftp\r\nlocalhost\r\nlocalhost\r\n",
 			}), ut(
 			"run commands: async using rpc client",
 			quickStart{},
 			asyncRunCommands{echoUnitNameToFile("run.output")},
-			verifyFile{testFile("run.output"), "juju run u/0\n"},
+			verifyFile{testFile("run.output"), "juju run u/0\r\n"},
 		), ut(
 			"run commands: waits for lock",
 			quickStart{},
@@ -143,7 +145,7 @@ func (s *UniterSuite) TestRunCommand(c *gc.C) {
 			asyncRunCommands{echoUnitNameToFile("wait.output")},
 			verifyNoFile{testFile("wait.output")},
 			releaseHookSyncLock,
-			verifyFile{testFile("wait.output"), "juju run u/0\n"},
+			verifyFile{testFile("wait.output"), "juju run u/0\r\n"},
 		),
 	})
 }
