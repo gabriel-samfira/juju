@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 
 	"github.com/juju/names"
 	"github.com/juju/testing"
@@ -41,6 +42,9 @@ type ContainerSetupSuite struct {
 var _ = gc.Suite(&ContainerSetupSuite{})
 
 func (s *ContainerSetupSuite) SetUpSuite(c *gc.C) {
+	if runtime.GOOS == "windows" {
+		c.Skip("Skipping container tests on windows")
+	}
 	s.CommonProvisionerSuite.SetUpSuite(c)
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/juju/names"
@@ -56,7 +57,7 @@ func NewRealPaths(c *gc.C) RealPaths {
 	return RealPaths{
 		tools:  c.MkDir(),
 		charm:  c.MkDir(),
-		socket: filepath.Join(c.MkDir(), "jujuc.socket"),
+		socket: `\\.\pipe` + filepath.Join(c.MkDir(), "jujuc.socket")[2:],
 	}
 }
 
@@ -270,8 +271,10 @@ func makeCharm(c *gc.C, spec hookSpec, charmDir string) {
 		_, err := fmt.Fprintf(hook, f+"\n", a...)
 		c.Assert(err, jc.ErrorIsNil)
 	}
-	printf("#!/bin/bash")
-	printf("echo $$ > pid")
+	if runtime.GOOS != "windows" {
+		printf("#!/bin/bash")
+	}
+	printf(echoPidScript)
 	if spec.stdout != "" {
 		printf("echo %s", spec.stdout)
 	}

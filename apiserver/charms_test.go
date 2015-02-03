@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/juju/names"
 	jc "github.com/juju/testing/checkers"
@@ -111,6 +112,10 @@ type charmsSuite struct {
 var _ = gc.Suite(&charmsSuite{})
 
 func (s *charmsSuite) SetUpSuite(c *gc.C) {
+	//TODO: fix this for windows
+	if runtime.GOOS == "windows" {
+		c.Skip("Skipping this on windows for now")
+	}
 	s.authHttpSuite.SetUpSuite(c)
 	s.archiveContentType = "application/zip"
 }

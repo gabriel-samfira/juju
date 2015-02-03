@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"runtime"
 	"text/template"
 	"time"
 
@@ -27,6 +28,10 @@ type PluginSuite struct {
 var _ = gc.Suite(&PluginSuite{})
 
 func (suite *PluginSuite) SetUpTest(c *gc.C) {
+	//TODO: fix tests for windows
+	if runtime.GOOS == "windows" {
+		c.Skip("Skipping for now on windows")
+	}
 	suite.FakeJujuHomeSuite.SetUpTest(c)
 	suite.oldPath = os.Getenv("PATH")
 	os.Setenv("PATH", "/bin:"+gitjujutesting.HomePath())

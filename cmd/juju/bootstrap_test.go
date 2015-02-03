@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/juju/cmd"
@@ -321,6 +322,10 @@ func (s *BootstrapSuite) checkSeriesArg(c *gc.C, argVariant string) *cmd.Context
 // In the case where we cannot examine an environment, we want the
 // error to propagate back up to the user.
 func (s *BootstrapSuite) TestBootstrapPropagatesEnvErrors(c *gc.C) {
+	//TODO: fix this for windows once permissions are fixed
+	if runtime.GOOS == "windows" {
+		c.Skip("Skip this on windows because permissions don't work properly")
+	}
 
 	const envName = "devenv"
 	env := resetJujuHome(c, envName)

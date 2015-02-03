@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -907,6 +908,9 @@ func (s *MachineSuite) TestJobManageEnvironRunsMinUnitsWorker(c *gc.C) {
 }
 
 func (s *MachineSuite) TestMachineAgentRunsAuthorisedKeysWorker(c *gc.C) {
+	if runtime.GOOS == "windows" {
+		c.Skip("bug 1403084: authentication worker not yet implemented on windows")
+	}
 	// Start the machine agent.
 	m, _, _ := s.primeAgent(c, version.Current, state.JobHostUnits)
 	a := s.newAgent(c, m)
@@ -983,6 +987,11 @@ func (s *MachineSuite) TestMachineAgentSymlinkJujuRun(c *gc.C) {
 }
 
 func (s *MachineSuite) TestMachineAgentSymlinkJujuRunExists(c *gc.C) {
+	if runtime.GOOS == "windows" {
+		// Cannot make symlink to nonexistent file on windows or
+		// create a file point a symlink to it then remove it
+		c.Skip("Cannot test this on windows")
+	}
 	err := symlink.New("/nowhere/special", JujuRun)
 	c.Assert(err, jc.ErrorIsNil)
 	_, err = os.Stat(JujuRun)
