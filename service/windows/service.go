@@ -17,7 +17,8 @@ import (
 
 var logger = loggo.GetLogger("juju.worker.deployer.service")
 
-var serviceInstallScript = `$data = Get-Content "C:\Juju\Jujud.pass"
+var serviceInstallScript = `$ErrorActionPreference = "Stop"
+$data = (Get-ItemProperty "HKLM:\SOFTWARE\Wow6432Node\jujud" Password).Password"
 if($? -eq $false){Write-Error "Failed to read encrypted password"; exit 1}
 $serviceName = "%s"
 $secpasswd = $data | convertto-securestring
