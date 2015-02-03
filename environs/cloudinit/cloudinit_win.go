@@ -57,7 +57,6 @@ func (w *windowsConfigure) ConfigureBasic() error {
 		fmt.Sprintf(`icacls "%s" /grant "jujud:(OI)(CI)(F)" /T`, w.renderer.FromSlash(baseDir)),
 		fmt.Sprintf(`mkdir %s`, w.renderer.FromSlash(tmpDir)),
 		fmt.Sprintf(`mkdir "%s"`, binDir),
-		fmt.Sprintf(`%s`, winSetPasswdScript),
 		fmt.Sprintf(`Start-ProcessAsUser -Command $powershell -Arguments "-File C:\juju\bin\save_pass.ps1 $juju_passwd" -Credential $jujuCreds`),
 		fmt.Sprintf(`mkdir "%s\locks"`, w.renderer.FromSlash(dataDir)),
 		fmt.Sprintf(`Start-ProcessAsUser -Command $cmdExe -Arguments '/C setx PATH "%%PATH%%;C:\Juju\bin"' -Credential $jujuCreds`),
