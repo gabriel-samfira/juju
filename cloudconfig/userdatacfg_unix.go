@@ -89,13 +89,13 @@ func (w *unixConfigure) ConfigureBasic() error {
 		"set -xe", // ensure we run all the scripts or abort.
 	)
 	switch w.os {
-	case version.Ubuntu:
-		w.conf.AddSSHAuthorizedKeys(w.icfg.AuthorizedKeys)
-	case version.CentOS:
+	case version.CentOS, version.Debian:
 		//TODO: Need to add user and set SSH keys for CentOS
 		script := fmt.Sprintf(initUbuntuScript, utils.ShQuote(w.icfg.AuthorizedKeys))
 		w.conf.AddScripts(script)
 		//w.conf.AddSSHAuthorizedKeys(w.icfg.AuthorizedKeys)
+	default:
+		w.conf.AddSSHAuthorizedKeys(w.icfg.AuthorizedKeys)
 	}
 	w.conf.SetOutput(cloudinit.OutAll, "| tee -a "+w.icfg.CloudInitOutputLog, "")
 	// Create a file in a well-defined location containing the machine's
@@ -114,7 +114,7 @@ func (w *unixConfigure) setDataDirPermissions() string {
 	os, _ := version.GetOSFromSeries(w.icfg.Series)
 	var user string
 	switch os {
-	case version.CentOS:
+	case version.CentOS, version.Debian:
 		user = "root"
 	default:
 		user = "syslog"
@@ -343,7 +343,7 @@ func base64yaml(m *config.Config) string {
 
 const initUbuntuScript = `
 set -e
-(id ubuntu &> /dev/null) || useradd -m ubuntu -s /bin/bash
+(id ubuntu 2> /dev/null) || useradd -m ubuntu -s /bin/bash
 umask 0077
 temp=$(mktemp)
 echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > $temp

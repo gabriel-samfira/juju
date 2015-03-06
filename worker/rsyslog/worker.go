@@ -382,7 +382,14 @@ func (h *RsyslogConfigHandler) ensureCertificates() error {
 // a suitable order in the case of failue.
 func writeCertificates(pairs []certPair) error {
 	// Files must be chowned to syslog:adm.
-	syslogUid, syslogGid, err := lookupUser("syslog")
+	var user string
+	switch version.Current.OS {
+	case version.Debian:
+		user = "root"
+	default:
+		user = "syslog"
+	}
+	syslogUid, syslogGid, err := lookupUser(user)
 	if err != nil {
 		return err
 	}
@@ -431,7 +438,14 @@ func (h *RsyslogConfigHandler) rsyslogServerCerts(caCert, caKey string) (string,
 // exist in the log directory and creates them if they do not.
 func (h *RsyslogConfigHandler) ensureLogrotate() error {
 	// Files must be chowned to syslog
-	syslogUid, syslogGid, err := lookupUser("syslog")
+	var user string
+	switch version.Current.OS {
+	case version.Debian:
+		user = "root"
+	default:
+		user = "syslog"
+	}
+	syslogUid, syslogGid, err := lookupUser(user)
 	if err != nil {
 		return err
 	}

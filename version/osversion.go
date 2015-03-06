@@ -80,6 +80,8 @@ func readSeries() (string, error) {
 	switch values["ID"] {
 	case strings.ToLower(Ubuntu.String()):
 		return getValue(ubuntuSeries, values["VERSION_ID"])
+	case strings.ToLower(Debian.String()):
+		return getValue(debianSeries, values["VERSION_ID"])
 	case strings.ToLower(CentOS.String()):
 		return getValue(centosSeries, values["VERSION_ID"])
 	default:

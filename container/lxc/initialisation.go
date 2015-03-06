@@ -7,11 +7,26 @@ import (
 	"github.com/juju/utils/apt"
 
 	"github.com/juju/juju/container"
+	"github.com/juju/juju/version"
 )
 
-var requiredPackages = []string{
-	"lxc",
-	"cloud-image-utils",
+func getRequredPackages(series string) ([]string, error) {
+	var requiredPackages []string
+
+	os, err := version.GetOSFromSeries(series)
+	if err != nil {
+		return requiredPackages, err
+	}
+
+	requiredPackages = []string{
+		"lxc",
+	}
+
+	switch os {
+	case version.Ubuntu:
+		requiredPackages = append(requiredPackages, "cloud-image-utils")
+	}
+	return requiredPackages, nil
 }
 
 type containerInitialiser struct {
@@ -36,7 +51,11 @@ func (ci *containerInitialiser) Initialise() error {
 // and runs each set of packages through AptGetInstall
 func ensureDependencies(series string) error {
 	var err error
-	aptGetInstallCommandList := apt.GetPreparePackages(requiredPackages, series)
+	pkg, err := getRequredPackages(series)
+	if err != nil {
+		return err
+	}
+	aptGetInstallCommandList := apt.GetPreparePackages(pkg, series)
 	for _, commands := range aptGetInstallCommandList {
 		err = apt.GetInstall(commands...)
 		if err != nil {

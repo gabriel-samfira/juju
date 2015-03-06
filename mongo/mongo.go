@@ -335,7 +335,7 @@ func addAptRepository(name string) error {
 // of the machine that it is going to be running on.
 func packageForSeries(series string) string {
 	switch series {
-	case "precise", "quantal", "raring", "saucy":
+	case "precise", "quantal", "raring", "saucy", "jessie":
 		return "mongodb-server"
 	default:
 		// trusty and onwards

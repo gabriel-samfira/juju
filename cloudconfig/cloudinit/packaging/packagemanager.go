@@ -36,7 +36,7 @@ func New(series string) (*PackageManager, error) {
 		return nil, err
 	}
 	switch os {
-	case version.Ubuntu:
+	case version.Ubuntu, version.Debian:
 		return &PackageManager{aptCmds}, nil
 	case version.CentOS:
 		return &PackageManager{yumCmds}, nil

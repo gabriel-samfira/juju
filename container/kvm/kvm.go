@@ -4,9 +4,10 @@
 package kvm
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/juju/errors"
@@ -45,30 +46,95 @@ var (
 // Utilized to provide a hard-coded path to kvm-ok
 var kvmPath = "/usr/sbin"
 
+func readCpuinfo() (map[string]string, error) {
+	cpuinfo := make(map[string]string)
+	file, err := os.Open("/proc/cpuinfo")
+	if err != nil {
+		return cpuinfo, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		s := strings.Split(line, ":")
+		if len(s) != 2 {
+			break
+		}
+		name := strings.TrimSpace(s[0])
+		val := strings.TrimSpace(s[1])
+		cpuinfo[name] = val
+	}
+	return cpuinfo, nil
+}
+
+func hasVirtFlags() (bool, string, error) {
+	info, err := readCpuinfo()
+	if err != nil {
+		return false, "", err
+	}
+	if val, ok := info["flags"]; ok {
+		s := strings.Split(val, " ")
+		for _, f := range s {
+			switch f {
+			case "vmx":
+				return true, "kvm_intel", nil
+			case "svm":
+				return true, "kvm_amd", nil
+			}
+		}
+	}
+	return false, "", nil
+}
+
 // IsKVMSupported calls into the kvm-ok executable from the cpu-checkers package.
 // It is a variable to allow us to overrid behaviour in the tests.
 var IsKVMSupported = func() (bool, error) {
-
-	// Prefer the user's $PATH first, but check /usr/sbin if we can't
-	// find kvm-ok there
-	var foundPath string
-	const binName = "kvm-ok"
-	if path, err := exec.LookPath(binName); err == nil {
-		foundPath = path
-	} else if path, err := exec.LookPath(filepath.Join(kvmPath, binName)); err == nil {
-		foundPath = path
-	} else {
-		return false, errors.NotFoundf("%s executable", binName)
-	}
-
-	command := exec.Command(foundPath)
-	output, err := command.CombinedOutput()
-
+	ok, virt, err := hasVirtFlags()
 	if err != nil {
-		return false, errors.Annotate(err, string(output))
+		return false, err
 	}
-	logger.Debugf("%s output:\n%s", binName, output)
-	return command.ProcessState.Success(), nil
+
+	kvmDev := "/dev/kvm"
+	if _, err := os.Stat(kvmDev); err == nil {
+		return true, nil
+	}
+
+	if ok {
+		// Try and modprobe kvm module
+		command := exec.Command("modprobe", virt)
+		err := command.Run()
+		if err != nil {
+			return false, errors.Trace(err)
+		}
+		// Lets check for KVM again
+		if _, err := os.Stat(kvmDev); err == nil {
+			return true, nil
+		}
+	}
+	return false, nil
+	/*
+		// Prefer the user's $PATH first, but check /usr/sbin if we can't
+		// find kvm-ok there
+		var foundPath string
+		const binName = "kvm-ok"
+		if path, err := exec.LookPath(binName); err == nil {
+			foundPath = path
+		} else if path, err := exec.LookPath(filepath.Join(kvmPath, binName)); err == nil {
+			foundPath = path
+		} else {
+			return false, errors.NotFoundf("%s executable", binName)
+		}
+
+		command := exec.Command(foundPath)
+		output, err := command.CombinedOutput()
+
+		if err != nil {
+			return false, errors.Annotate(err, string(output))
+		}
+		logger.Debugf("%s output:\n%s", binName, output)
+		return command.ProcessState.Success(), nil
+	*/
 }
 
 // NewContainerManager returns a manager object that can start and stop kvm

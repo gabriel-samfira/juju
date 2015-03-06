@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/juju/juju/cloudconfig/cloudinit/packaging"
+	"github.com/juju/juju/version"
 	"github.com/juju/utils/apt"
 	"github.com/juju/utils/proxy"
 )
@@ -15,14 +16,19 @@ import (
 func updatePackagesUbuntu(cfg CloudConfig, series string) {
 	requiredPackages := []string{
 		"curl",
-		"cpu-checker",
+		//"cpu-checker",
 		// TODO(axw) 2014-07-02 #1277359
 		// Don't install bridge-utils in cloud-init;
 		// leave it to the networker worker.
 		"bridge-utils",
 		"rsyslog-gnutls",
 		"cloud-utils",
-		"cloud-image-utils",
+	}
+
+	os, _ := version.GetOSFromSeries(series)
+	switch os {
+	case version.Ubuntu:
+		requiredPackages = append(requiredPackages, "cloud-image-utils")
 	}
 
 	// The required packages need to come from the correct repo.

@@ -162,7 +162,7 @@ func (c *RunCommand) executeInUnitContext() (*exec.ExecResponse, error) {
 // registry values on Windows).
 func (c *RunCommand) appendProxyToCommands() string {
 	switch version.Current.OS {
-	case version.Ubuntu:
+	case version.Ubuntu, version.Debian:
 		return `[ -f "/home/ubuntu/.juju-proxy" ] && . "/home/ubuntu/.juju-proxy"` + "\n" + c.commands
 	default:
 		return c.commands

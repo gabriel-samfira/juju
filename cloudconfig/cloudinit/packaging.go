@@ -81,7 +81,7 @@ func updatePackages(series string, cfg CloudConfig) error {
 		return err
 	}
 	switch os {
-	case version.Ubuntu:
+	case version.Ubuntu, version.Debian:
 		updatePackagesUbuntu(cfg, series)
 	case version.CentOS:
 		//TODO: Do something here
@@ -95,7 +95,7 @@ func updateProxySettings(series string, cfg CloudConfig, aptProxySettings proxy.
 		return err
 	}
 	switch os {
-	case version.Ubuntu:
+	case version.Ubuntu, version.Debian:
 		updateProxySettingsUbuntu(cfg, aptProxySettings)
 	case version.CentOS:
 		//TODO: Do something here

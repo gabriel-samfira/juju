@@ -132,7 +132,8 @@ func (p environProvider) PrepareForCreateEnvironment(cfg *config.Config) (*confi
 		setIfNotBlank(config.FtpProxyKey, proxySettings.Ftp)
 		setIfNotBlank(config.NoProxyKey, proxySettings.NoProxy)
 	}
-	if version.Current.OS == version.Ubuntu {
+	switch version.Current.OS {
+	case version.Ubuntu, version.Debian:
 		if cfg.AptHttpProxy() == "" &&
 			cfg.AptHttpsProxy() == "" &&
 			cfg.AptFtpProxy() == "" {

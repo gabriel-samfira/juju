@@ -20,6 +20,7 @@ const (
 	Windows
 	OSX
 	CentOS
+	Debian
 )
 
 func (t OSType) String() string {
@@ -32,6 +33,8 @@ func (t OSType) String() string {
 		return "OSX"
 	case CentOS:
 		return "CentOS"
+	case Debian:
+		return "Debian"
 	}
 	return "Unknown"
 }
@@ -57,10 +60,15 @@ var seriesVersions = map[string]string{
 	"win8":        "win8",
 	"win81":       "win81",
 	"centos7":     "7",
+	"jessie":      "8",
 }
 
 var centosSeries = map[string]string{
 	"centos7": "7",
+}
+
+var debianSeries = map[string]string{
+	"jessie": "8",
 }
 
 var ubuntuSeries = map[string]string{
@@ -113,6 +121,9 @@ func GetOSFromSeries(series string) (OSType, error) {
 		if val == series {
 			return OSX, nil
 		}
+	}
+	if _, ok := debianSeries[series]; ok {
+		return Debian, nil
 	}
 
 	return Unknown, fmt.Errorf("invalid series %q", series)

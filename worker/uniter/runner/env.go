@@ -15,7 +15,7 @@ func osDependentEnvVars(paths Paths) []string {
 	switch version.Current.OS {
 	case version.Windows:
 		return windowsEnv(paths)
-	case version.Ubuntu:
+	case version.Ubuntu, version.Debian:
 		return ubuntuEnv(paths)
 	case version.CentOS:
 		return centosEnv(paths)

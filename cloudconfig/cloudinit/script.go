@@ -84,7 +84,7 @@ func getCommandsForAddingPackages(cfg CloudConfig, series string) ([]string, err
 		return nil, err
 	}
 	switch os {
-	case version.Ubuntu:
+	case version.Ubuntu, version.Debian:
 		return getUbuntuCommandsForAddingPackages(cfg, pacman)
 	case version.CentOS:
 		return getCentOSCommandsForAddingPackages(cfg, pacman)

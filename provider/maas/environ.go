@@ -1019,7 +1019,7 @@ func (environ *maasEnviron) newCloudinitConfig(hostname, primaryIface, series st
 	switch operatingSystem {
 	case version.Windows:
 		cloudcfg.AddScripts(runCmd)
-	case version.Ubuntu:
+	case version.Ubuntu, version.Debian:
 		cloudcfg.SetSystemUpdate(true)
 		cloudcfg.AddScripts("set -xe", runCmd)
 	}

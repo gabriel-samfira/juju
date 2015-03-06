@@ -186,6 +186,7 @@ func ConfigureMachine(ctx environs.BootstrapContext, client ssh.Client, host str
 		return err
 	}
 	script := shell.DumpFileOnErrorScript(instanceConfig.CloudInitOutputLog) + configScript
+	fmt.Println(script)
 	return sshinit.RunConfigureScript(script, sshinit.ConfigureParams{
 		Host:           "ubuntu@" + host,
 		Client:         client,

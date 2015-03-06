@@ -73,6 +73,8 @@ func VersionInitSystem(vers version.Binary) (string, bool) {
 			}
 			return InitSystemSystemd, true
 		}
+	case version.Debian:
+		return InitSystemSystemd, true
 	case version.CentOS:
 		return InitSystemSystemd, true
 	default:

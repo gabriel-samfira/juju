@@ -326,7 +326,7 @@ func New(series string) (CloudConfig, error) {
 		// Doesn't really matter what we return here since windows only uses
 		// runcmd anyway
 		return &UbuntuCloudConfig{&cloudConfig{make(map[string]interface{})}}, nil
-	case version.Ubuntu:
+	case version.Ubuntu, version.Debian:
 		return &UbuntuCloudConfig{&cloudConfig{make(map[string]interface{})}}, nil
 	case version.CentOS:
 		return &CentOSCloudConfig{&cloudConfig{make(map[string]interface{})}}, nil
@@ -364,7 +364,7 @@ func NewRenderer(series string) (Renderer, error) {
 	switch operatingSystem {
 	case version.Windows:
 		return &WindowsRenderer{}, nil
-	case version.Ubuntu:
+	case version.Ubuntu, version.Debian:
 		return &UbuntuRenderer{linuxRenderer{}}, nil
 	case version.CentOS:
 		return &CentOSRenderer{linuxRenderer{}}, nil
