@@ -165,6 +165,8 @@ func ConfigureMachine(ctx environs.BootstrapContext, client ssh.Client, host str
 	// point. For that reason, we do not call StopInterruptNotify
 	// until this function completes.
 	cloudcfg := coreCloudinit.New()
+
+	// Set packaging update here
 	cloudcfg.SetAptUpdate(machineConfig.EnableOSRefreshUpdate)
 	cloudcfg.SetAptUpgrade(machineConfig.EnableOSUpgrade)
 
