@@ -31,27 +31,6 @@ type UserdataConfig interface {
 	Render() ([]byte, error)
 }
 
-// addAgentInfo adds agent-required information to the agent's directory
-// and returns the agent directory name.
-func addAgentInfo(
-	cfg *MachineConfig,
-	c *cloudinit.Config,
-	tag names.Tag,
-	toolsVersion version.Number,
-) (agent.Config, error) {
-	acfg, err := cfg.agentConfig(tag, toolsVersion)
-	if err != nil {
-		return nil, err
-	}
-	acfg.SetValue(agent.AgentServiceName, cfg.MachineAgentServiceName)
-	cmds, err := acfg.WriteCommands(cfg.Series)
-	if err != nil {
-		return nil, errors.Annotate(err, "failed to write commands")
-	}
-	c.AddScripts(cmds...)
-	return acfg, nil
-}
-
 func NewUserdataConfig(mcfg *MachineConfig, conf *cloudinit.Config) (UserdataConfig, error) {
 	// TODO(ericsnow) bug #1426217
 	// Protect mcfg and conf better.
@@ -97,6 +76,22 @@ func (c *baseConfigure) init() error {
 
 func (c *baseConfigure) Render() ([]byte, error) {
 	return c.renderer.Render(c.conf)
+}
+
+// addAgentInfo adds agent-required information to the agent's directory
+// and returns the agent directory name.
+func (c *baseConfigure) addAgentInfo(tag names.Tag) (agent.Config, error) {
+	acfg, err := c.mcfg.agentConfig(tag, c.mcfg.Tools.Version.Number)
+	if err != nil {
+		return nil, err
+	}
+	acfg.SetValue(agent.AgentServiceName, c.mcfg.MachineAgentServiceName)
+	cmds, err := acfg.WriteCommands(c.mcfg.Series)
+	if err != nil {
+		return nil, errors.Annotate(err, "failed to write commands")
+	}
+	c.conf.AddScripts(cmds...)
+	return acfg, nil
 }
 
 func (c *baseConfigure) addMachineAgentToBoot(name string) error {

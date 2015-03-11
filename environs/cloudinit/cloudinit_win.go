@@ -89,7 +89,7 @@ func (w *windowsConfigure) ConfigureJuju() error {
 	}
 
 	machineTag := names.NewMachineTag(w.mcfg.MachineId)
-	_, err = addAgentInfo(w.mcfg, w.conf, machineTag, w.mcfg.Tools.Version.Number)
+	_, err = w.addAgentInfo(machineTag)
 	if err != nil {
 		return err
 	}

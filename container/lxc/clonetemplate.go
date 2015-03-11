@@ -57,6 +57,7 @@ func templateUserData(
 	}
 
 	config.AddSSHAuthorizedKeys(authorizedKeys)
+	// add centos magic here
 	if enablePackageUpdates {
 		cloudinit.MaybeAddCloudArchiveCloudTools(config, series)
 	}
