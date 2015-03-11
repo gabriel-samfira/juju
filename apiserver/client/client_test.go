@@ -3203,7 +3203,7 @@ func (s *clientSuite) TestProvisioningScript(c *gc.C) {
 		Nonce:     apiParams.Nonce,
 	})
 	c.Assert(err, jc.ErrorIsNil)
-	mcfg, err := client.MachineConfig(s.State, machineId, apiParams.Nonce, "")
+	mcfg, err := client.InstanceConfig(s.State, machineId, apiParams.Nonce, "")
 	c.Assert(err, jc.ErrorIsNil)
 	sshinitScript, err := manual.ProvisioningScript(mcfg)
 	c.Assert(err, jc.ErrorIsNil)

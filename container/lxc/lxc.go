@@ -188,7 +188,7 @@ func preferFastLXC(release string) bool {
 
 // CreateContainer creates or clones an LXC container.
 func (manager *containerManager) CreateContainer(
-	machineConfig *cloudinit.MachineConfig,
+	machineConfig *cloudinit.InstanceConfig,
 	series string,
 	networkConfig *container.NetworkConfig,
 ) (inst instance.Instance, _ *instance.HardwareCharacteristics, err error) {

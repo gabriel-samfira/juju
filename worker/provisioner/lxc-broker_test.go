@@ -104,7 +104,7 @@ func (s *lxcBrokerSuite) SetUpTest(c *gc.C) {
 	c.Assert(err, jc.ErrorIsNil)
 }
 
-func (s *lxcBrokerSuite) machineConfig(c *gc.C, machineId string) *cloudinit.MachineConfig {
+func (s *lxcBrokerSuite) machineConfig(c *gc.C, machineId string) *cloudinit.InstanceConfig {
 	machineNonce := "fake-nonce"
 	// To isolate the tests from the host's architecture, we override it here.
 	s.PatchValue(&version.Current.Arch, arch.AMD64)
@@ -123,9 +123,9 @@ func (s *lxcBrokerSuite) startInstance(c *gc.C, machineId string) instance.Insta
 		URL:     "http://tools.testing.invalid/2.3.4-quantal-amd64.tgz",
 	}}
 	result, err := s.broker.StartInstance(environs.StartInstanceParams{
-		Constraints:   cons,
-		Tools:         possibleTools,
-		MachineConfig: machineConfig,
+		Constraints:    cons,
+		Tools:          possibleTools,
+		InstanceConfig: machineConfig,
 	})
 	c.Assert(err, jc.ErrorIsNil)
 	return result.Instance
@@ -158,9 +158,9 @@ func (s *lxcBrokerSuite) TestStartInstanceHostArch(c *gc.C) {
 		URL:     "http://tools.testing.invalid/2.3.4-quantal-ppc64el.tgz",
 	}}
 	_, err := s.broker.StartInstance(environs.StartInstanceParams{
-		Constraints:   constraints.Value{},
-		Tools:         possibleTools,
-		MachineConfig: machineConfig,
+		Constraints:    constraints.Value{},
+		Tools:          possibleTools,
+		InstanceConfig: machineConfig,
 	})
 	c.Assert(err, jc.ErrorIsNil)
 	c.Assert(machineConfig.Tools.Version.Arch, gc.Equals, arch.PPC64EL)
@@ -177,9 +177,9 @@ func (s *lxcBrokerSuite) TestStartInstanceToolsArchNotFound(c *gc.C) {
 		URL:     "http://tools.testing.invalid/2.3.4-quantal-amd64.tgz",
 	}}
 	_, err := s.broker.StartInstance(environs.StartInstanceParams{
-		Constraints:   constraints.Value{},
-		Tools:         possibleTools,
-		MachineConfig: machineConfig,
+		Constraints:    constraints.Value{},
+		Tools:          possibleTools,
+		InstanceConfig: machineConfig,
 	})
 	c.Assert(err, gc.ErrorMatches, "need tools for arch ppc64el, only found \\[amd64\\]")
 }
