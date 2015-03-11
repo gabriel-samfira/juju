@@ -13,7 +13,7 @@ import (
 	"github.com/juju/utils"
 
 	"github.com/juju/juju/agent/tools"
-	"github.com/juju/juju/cloudinit"
+	"github.com/juju/juju/cloudconfig/cloudinit"
 	"github.com/juju/juju/juju/osenv"
 	"github.com/juju/juju/service/common"
 )

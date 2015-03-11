@@ -12,8 +12,9 @@ import (
 	"github.com/juju/errors"
 	"github.com/juju/loggo"
 
-	coreCloudinit "github.com/juju/juju/cloudinit"
-	"github.com/juju/juju/environs/cloudinit"
+	"github.com/juju/juju/cloudconfig"
+	"github.com/juju/juju/cloudconfig/cloudinit"
+	"github.com/juju/juju/cloudconfig/instancecfg"
 )
 
 var (
@@ -25,11 +26,11 @@ var (
 // the serialized form out to a cloud-init file in the directory
 // specified.
 func WriteUserData(
-	machineConfig *cloudinit.InstanceConfig,
+	instanceConfig *instancecfg.InstanceConfig,
 	networkConfig *NetworkConfig,
 	directory string,
 ) (string, error) {
-	userData, err := cloudInitUserData(machineConfig, networkConfig)
+	userData, err := cloudInitUserData(instanceConfig, networkConfig)
 	if err != nil {
 		logger.Errorf("failed to create user data: %v", err)
 		return "", err
@@ -76,8 +77,8 @@ var networkInterfacesFile = "/etc/network/interfaces"
 // newCloudInitConfigWithNetworks creates a cloud-init config which
 // might include per-interface networking config if
 // networkConfig.Interfaces is not empty.
-func newCloudInitConfigWithNetworks(networkConfig *NetworkConfig) (*coreCloudinit.Config, error) {
-	cloudConfig := coreCloudinit.New()
+func newCloudInitConfigWithNetworks(networkConfig *NetworkConfig) (*cloudinit.Config, error) {
+	cloudConfig := cloudinit.New()
 	if networkConfig == nil || len(networkConfig.Interfaces) == 0 {
 		// Don't generate networking config.
 		logger.Tracef("no cloud-init network config to generate")
@@ -101,11 +102,11 @@ func newCloudInitConfigWithNetworks(networkConfig *NetworkConfig) (*coreCloudini
 }
 
 func cloudInitUserData(
-	machineConfig *cloudinit.InstanceConfig,
+	instanceConfig *instancecfg.InstanceConfig,
 	networkConfig *NetworkConfig,
 ) ([]byte, error) {
 	cloudConfig, err := newCloudInitConfigWithNetworks(networkConfig)
-	udata, err := cloudinit.NewUserdataConfig(machineConfig, cloudConfig)
+	udata, err := cloudconfig.NewUserdataConfig(instanceConfig, cloudConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +118,7 @@ func cloudInitUserData(
 	// logged in the host.
 	cloudConfig.AddRunCmd("ifconfig")
 
-	renderer, err := coreCloudinit.NewRenderer(machineConfig.Series)
+	renderer, err := cloudinit.NewRenderer(instanceConfig.Series)
 	if err != nil {
 		return nil, err
 	}

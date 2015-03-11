@@ -27,8 +27,8 @@ import (
 	"launchpad.net/golxc"
 
 	"github.com/juju/juju/agent"
+	"github.com/juju/juju/cloudconfig/instancecfg"
 	"github.com/juju/juju/container"
-	"github.com/juju/juju/environs/cloudinit"
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/juju/arch"
 	"github.com/juju/juju/version"
@@ -188,7 +188,7 @@ func preferFastLXC(release string) bool {
 
 // CreateContainer creates or clones an LXC container.
 func (manager *containerManager) CreateContainer(
-	machineConfig *cloudinit.InstanceConfig,
+	instanceConfig *instancecfg.InstanceConfig,
 	series string,
 	networkConfig *container.NetworkConfig,
 ) (inst instance.Instance, _ *instance.HardwareCharacteristics, err error) {
@@ -208,7 +208,7 @@ func (manager *containerManager) CreateContainer(
 		}
 	}(time.Now())
 
-	name := names.NewMachineTag(machineConfig.MachineId).String()
+	name := names.NewMachineTag(instanceConfig.MachineId).String()
 	if manager.name != "" {
 		name = fmt.Sprintf("%s-%s", manager.name, name)
 	}
@@ -219,7 +219,7 @@ func (manager *containerManager) CreateContainer(
 		return nil, nil, errors.Annotate(err, "failed to create a directory for the container")
 	}
 	logger.Tracef("write cloud-init")
-	userDataFilename, err := container.WriteUserData(machineConfig, networkConfig, directory)
+	userDataFilename, err := container.WriteUserData(instanceConfig, networkConfig, directory)
 	if err != nil {
 		return nil, nil, errors.Annotate(err, "failed to write user data")
 	}
@@ -230,11 +230,11 @@ func (manager *containerManager) CreateContainer(
 			manager.backingFilesystem,
 			series,
 			networkConfig,
-			machineConfig.AuthorizedKeys,
-			machineConfig.AptProxySettings,
-			machineConfig.AptMirror,
-			machineConfig.EnableOSRefreshUpdate,
-			machineConfig.EnableOSUpgrade,
+			instanceConfig.AuthorizedKeys,
+			instanceConfig.AptProxySettings,
+			instanceConfig.AptMirror,
+			instanceConfig.EnableOSRefreshUpdate,
+			instanceConfig.EnableOSUpgrade,
 			manager.imageURLGetter,
 		)
 		if err != nil {

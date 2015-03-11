@@ -20,6 +20,7 @@ import (
 	"github.com/juju/juju/agent"
 	apiprovisioner "github.com/juju/juju/api/provisioner"
 	"github.com/juju/juju/apiserver/params"
+	"github.com/juju/juju/cloudconfig/instancecfg"
 	"github.com/juju/juju/container"
 	"github.com/juju/juju/container/lxc"
 	"github.com/juju/juju/environs"
@@ -114,7 +115,7 @@ func (broker *lxcBroker) StartInstance(args environs.StartInstanceParams) (*envi
 		lxcLogger.Errorf("failed to get container config: %v", err)
 		return nil, err
 	}
-	if err := environs.PopulateMachineConfig(
+	if err := instancecfg.PopulateInstanceConfig(
 		args.InstanceConfig,
 		config.ProviderType,
 		config.AuthorizedKeys,

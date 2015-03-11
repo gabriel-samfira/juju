@@ -287,13 +287,13 @@ func (s *LxcSuite) TestUpdateContainerConfig(c *gc.C) {
 	}})
 
 	manager := s.makeManager(c, "test")
-	machineConfig, err := containertesting.MockMachineConfig("1/lxc/0")
+	instanceConfig, err := containertesting.MockMachineConfig("1/lxc/0")
 	c.Assert(err, jc.ErrorIsNil)
 	envConfig, err := config.New(config.NoDefaults, dummy.SampleConfig())
 	c.Assert(err, jc.ErrorIsNil)
-	machineConfig.Config = envConfig
+	instanceConfig.Config = envConfig
 	instance := containertesting.CreateContainerWithMachineAndNetworkConfig(
-		c, manager, machineConfig, networkConfig,
+		c, manager, instanceConfig, networkConfig,
 	)
 	name := string(instance.Id())
 
