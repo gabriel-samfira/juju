@@ -77,8 +77,11 @@ var networkInterfacesFile = "/etc/network/interfaces"
 // newCloudInitConfigWithNetworks creates a cloud-init config which
 // might include per-interface networking config if
 // networkConfig.Interfaces is not empty.
-func newCloudInitConfigWithNetworks(networkConfig *NetworkConfig) (*cloudinit.Config, error) {
-	cloudConfig := cloudinit.New()
+func newCloudInitConfigWithNetworks(series string, networkConfig *NetworkConfig) (cloudinit.CloudConfig, error) {
+	cloudConfig, err := cloudinit.New(series)
+	if err != nil {
+		return nil, errors.Annotate(err, "cannot create new cloudinit template")
+	}
 	if networkConfig == nil || len(networkConfig.Interfaces) == 0 {
 		// Don't generate networking config.
 		logger.Tracef("no cloud-init network config to generate")
@@ -105,7 +108,7 @@ func cloudInitUserData(
 	instanceConfig *instancecfg.InstanceConfig,
 	networkConfig *NetworkConfig,
 ) ([]byte, error) {
-	cloudConfig, err := newCloudInitConfigWithNetworks(networkConfig)
+	cloudConfig, err := newCloudInitConfigWithNetworks(instanceConfig.Series, networkConfig)
 	udata, err := cloudconfig.NewUserdataConfig(instanceConfig, cloudConfig)
 	if err != nil {
 		return nil, err

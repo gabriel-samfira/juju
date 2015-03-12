@@ -999,7 +999,7 @@ func (environ *maasEnviron) selectNode(args selectNodeArgs) (*gomaasapi.MAASObje
 
 // newCloudinitConfig creates a cloudinit.Config structure
 // suitable as a base for initialising a MAAS node.
-func (environ *maasEnviron) newCloudinitConfig(hostname, primaryIface, series string) (*cloudinit.Config, error) {
+func (environ *maasEnviron) newCloudinitConfig(hostname, primaryIface, series string) (cloudinit.CloudConfig, error) {
 	info := machineInfo{hostname}
 	runCmd, err := info.cloudinitRunCmd(series)
 
@@ -1007,7 +1007,10 @@ func (environ *maasEnviron) newCloudinitConfig(hostname, primaryIface, series st
 		return nil, err
 	}
 
-	cloudcfg := cloudinit.New()
+	cloudcfg, err := cloudinit.New(series)
+	if err != nil {
+		return nil, err
+	}
 	operatingSystem, err := version.GetOSFromSeries(series)
 	if err != nil {
 		return nil, err
@@ -1017,7 +1020,7 @@ func (environ *maasEnviron) newCloudinitConfig(hostname, primaryIface, series st
 	case version.Windows:
 		cloudcfg.AddScripts(runCmd)
 	case version.Ubuntu:
-		cloudcfg.SetAptUpdate(true)
+		cloudcfg.SetSystemUpdate(true)
 		cloudcfg.AddScripts("set -xe", runCmd)
 	}
 	return cloudcfg, nil

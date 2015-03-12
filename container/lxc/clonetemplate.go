@@ -44,7 +44,10 @@ func templateUserData(
 	enablePackageUpdates bool,
 	enableOSUpgrades bool,
 ) ([]byte, error) {
-	config := cloudinit.New()
+	config, err := cloudinit.New(series)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 	config.AddScripts(
 		"set -xe", // ensure we run all the scripts or abort.
 	)

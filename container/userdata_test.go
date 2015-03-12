@@ -45,7 +45,7 @@ func (s *UserDataSuite) TestNewCloudInitConfigWithNetworks(c *gc.C) {
 		NoAutoStart:   true,
 	}}
 	netConfig := container.BridgeNetworkConfig("foo", ifaces)
-	cloudConf, err := container.NewCloudInitConfigWithNetworks(netConfig)
+	cloudConf, err := container.NewCloudInitConfigWithNetworks("quantal", netConfig)
 	c.Assert(err, jc.ErrorIsNil)
 	expected := `
 #cloud-config
@@ -77,7 +77,7 @@ bootcmd:
 
 func (s *UserDataSuite) TestNewCloudInitConfigWithNetworksNoConfig(c *gc.C) {
 	netConfig := container.BridgeNetworkConfig("foo", nil)
-	cloudConf, err := container.NewCloudInitConfigWithNetworks(netConfig)
+	cloudConf, err := container.NewCloudInitConfigWithNetworks("quantal", netConfig)
 	c.Assert(err, jc.ErrorIsNil)
 	expected := "#cloud-config\n{}\n"
 	assertUserData(c, cloudConf, expected)
@@ -94,7 +94,7 @@ func (s *UserDataSuite) TestCloudInitUserData(c *gc.C) {
 	c.Assert(string(data), jc.HasPrefix, "#cloud-config\n")
 }
 
-func assertUserData(c *gc.C, cloudConf *cloudinit.Config, expected string) {
+func assertUserData(c *gc.C, cloudConf cloudinit.CloudConfig, expected string) {
 	renderer, err := cloudinit.NewRenderer("quantal")
 	c.Assert(err, jc.ErrorIsNil)
 	data, err := renderer.Render(cloudConf)
