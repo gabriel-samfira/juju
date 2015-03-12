@@ -12,6 +12,7 @@ import (
 	gc "gopkg.in/check.v1"
 
 	"github.com/juju/juju/cloudconfig/cloudinit"
+	"github.com/juju/juju/cloudconfig/cloudinit/packaging"
 	coretesting "github.com/juju/juju/testing"
 	sshtesting "github.com/juju/juju/utils/ssh/testing"
 )
@@ -31,82 +32,68 @@ func Test1(t *testing.T) {
 var ctests = []struct {
 	name      string
 	expect    map[string]interface{}
-	setOption func(cfg *cloudinit.Config)
+	setOption func(cfg cloudinit.CloudConfig)
 }{
 	{
 		"User",
 		map[string]interface{}{"user": "me"},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.SetUser("me")
 		},
 	},
 	{
-		"AptUpgrade",
+		"PackageUpgrade",
 		map[string]interface{}{"apt_upgrade": true},
-		func(cfg *cloudinit.Config) {
-			cfg.SetAptUpgrade(true)
+		func(cfg cloudinit.CloudConfig) {
+			cfg.SetSystemUpgrade(true)
 		},
 	},
 	{
-		"AptUpdate",
+		"PackageUpdate",
 		map[string]interface{}{"apt_update": true},
-		func(cfg *cloudinit.Config) {
-			cfg.SetAptUpdate(true)
+		func(cfg cloudinit.CloudConfig) {
+			cfg.SetSystemUpdate(true)
 		},
 	},
 	{
-		"AptProxy",
+		"PackageProxy",
 		map[string]interface{}{"apt_proxy": "http://foo.com"},
-		func(cfg *cloudinit.Config) {
-			cfg.SetAptProxy("http://foo.com")
+		func(cfg cloudinit.CloudConfig) {
+			cfg.SetPackageProxy("http://foo.com")
 		},
 	},
 	{
-		"AptMirror",
+		"PackageMirror",
 		map[string]interface{}{"apt_mirror": "http://foo.com"},
-		func(cfg *cloudinit.Config) {
-			cfg.SetAptMirror("http://foo.com")
-		},
-	},
-	{
-		"AptPreserveSourcesList",
-		map[string]interface{}{"apt_mirror": true},
-		func(cfg *cloudinit.Config) {
-			cfg.SetAptPreserveSourcesList(true)
-		},
-	},
-	{
-		"DebconfSelections",
-		map[string]interface{}{"debconf_selections": "# Force debconf priority to critical.\ndebconf debconf/priority select critical\n"},
-		func(cfg *cloudinit.Config) {
-			cfg.SetDebconfSelections("# Force debconf priority to critical.\ndebconf debconf/priority select critical\n")
+		func(cfg cloudinit.CloudConfig) {
+			cfg.SetPackageMirror("http://foo.com")
 		},
 	},
 	{
 		"DisableEC2Metadata",
 		map[string]interface{}{"disable_ec2_metadata": true},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.SetDisableEC2Metadata(true)
 		},
 	},
 	{
 		"FinalMessage",
 		map[string]interface{}{"final_message": "goodbye"},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.SetFinalMessage("goodbye")
 		},
 	},
 	{
 		"Locale",
 		map[string]interface{}{"locale": "en_us"},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.SetLocale("en_us")
 		},
 	},
 	{
 		"DisableRoot",
 		map[string]interface{}{"disable_root": false},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.SetDisableRoot(false)
 		},
 	},
@@ -116,7 +103,7 @@ var ctests = []struct {
 			fmt.Sprintf("%s Juju:user@host", sshtesting.ValidKeyOne.Key),
 			fmt.Sprintf("%s Juju:another@host", sshtesting.ValidKeyTwo.Key),
 		}},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.AddSSHAuthorizedKeys(sshtesting.ValidKeyOne.Key + " Juju:user@host")
 			cfg.AddSSHAuthorizedKeys(sshtesting.ValidKeyTwo.Key + " another@host")
 		},
@@ -128,7 +115,7 @@ var ctests = []struct {
 			fmt.Sprintf("%s Juju:user@host", sshtesting.ValidKeyTwo.Key),
 			fmt.Sprintf("%s Juju:another@host", sshtesting.ValidKeyThree.Key),
 		}},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.AddSSHAuthorizedKeys("#command\n" + sshtesting.ValidKeyOne.Key)
 			cfg.AddSSHAuthorizedKeys(
 				sshtesting.ValidKeyTwo.Key + " user@host\n# comment\n\n" +
@@ -141,7 +128,7 @@ var ctests = []struct {
 		map[string]interface{}{"ssh_keys": map[string]interface{}{
 			"rsa_private": "key1data",
 		}},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.AddSSHKey(cloudinit.RSAPrivate, "key1data")
 		},
 	},
@@ -150,7 +137,7 @@ var ctests = []struct {
 		map[string]interface{}{"ssh_keys": map[string]interface{}{
 			"rsa_public": "key2data",
 		}},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.AddSSHKey(cloudinit.RSAPublic, "key2data")
 		},
 	},
@@ -159,7 +146,7 @@ var ctests = []struct {
 		map[string]interface{}{"ssh_keys": map[string]interface{}{
 			"dsa_public": "key1data",
 		}},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.AddSSHKey(cloudinit.DSAPublic, "key1data")
 		},
 	},
@@ -168,7 +155,7 @@ var ctests = []struct {
 		map[string]interface{}{"ssh_keys": map[string]interface{}{
 			"dsa_private": "key2data",
 		}},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.AddSSHKey(cloudinit.DSAPrivate, "key2data")
 		},
 	},
@@ -177,7 +164,7 @@ var ctests = []struct {
 		map[string]interface{}{"output": map[string]interface{}{
 			"all": []string{">foo", "|bar"},
 		}},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.SetOutput("all", ">foo", "|bar")
 		},
 	},
@@ -186,24 +173,24 @@ var ctests = []struct {
 		map[string]interface{}{"output": map[string]interface{}{
 			"all": ">foo",
 		}},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.SetOutput(cloudinit.OutAll, ">foo", "")
 		},
 	},
 	{
-		"AptSources",
+		"PackageSources",
 		map[string]interface{}{"apt_sources": []map[string]interface{}{
 			{
 				"source": "keyName",
 				"key":    "someKey",
 			},
 		}},
-		func(cfg *cloudinit.Config) {
-			cfg.AddAptSource("keyName", "someKey", nil)
+		func(cfg cloudinit.CloudConfig) {
+			cfg.AddPackageSource(packaging.Source{"keyName", "someKey", nil})
 		},
 	},
 	{
-		"AptSources with preferences",
+		"PackageSources with preferences",
 		map[string]interface{}{
 			"apt_sources": []map[string]interface{}{
 				{
@@ -220,15 +207,15 @@ var ctests = []struct {
 					"' > '/some/path'",
 			},
 		},
-		func(cfg *cloudinit.Config) {
-			prefs := &cloudinit.AptPreferences{
+		func(cfg cloudinit.CloudConfig) {
+			prefs := packaging.PackagePreferences{
 				Path:        "/some/path",
 				Explanation: "test",
 				Package:     "*",
 				Pin:         "release n=series",
-				PinPriority: 123,
+				Priority:    123,
 			}
-			cfg.AddAptSource("keyName", "someKey", prefs)
+			cfg.AddPackageSource(packaging.Source{"keyName", "someKey", &prefs})
 		},
 	},
 	{
@@ -237,18 +224,9 @@ var ctests = []struct {
 			"juju",
 			"ubuntu",
 		}},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.AddPackage("juju")
 			cfg.AddPackage("ubuntu")
-		},
-	},
-	{
-		"Packages with --target-release",
-		map[string]interface{}{"packages": []string{
-			"--target-release precise-updates/cloud-tools mongodb-server",
-		}},
-		func(cfg *cloudinit.Config) {
-			cfg.AddPackageFromTargetRelease("mongodb-server", "precise-updates/cloud-tools")
 		},
 	},
 	{
@@ -257,9 +235,9 @@ var ctests = []struct {
 			"ls > /dev",
 			[]string{"ls", ">with space"},
 		}},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.AddBootCmd("ls > /dev")
-			cfg.AddBootCmdArgs("ls", ">with space")
+			cfg.AddBootCmd("ls >with space")
 		},
 	},
 	{
@@ -268,7 +246,7 @@ var ctests = []struct {
 			{"x", "y"},
 			{"z", "w"},
 		}},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.AddMount("x", "y")
 			cfg.AddMount("z", "w")
 		},
@@ -276,7 +254,7 @@ var ctests = []struct {
 	{
 		"Attr",
 		map[string]interface{}{"arbitraryAttr": "someValue"},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.SetAttr("arbitraryAttr", "someValue")
 		},
 	},
@@ -285,7 +263,7 @@ var ctests = []struct {
 		map[string]interface{}{"runcmd": []string{
 			"ifconfig",
 		}},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.AddRunCmd("ifconfig")
 		},
 	},
@@ -295,8 +273,8 @@ var ctests = []struct {
 			"echo 'Hello World'",
 			"ifconfig",
 		}},
-		func(cfg *cloudinit.Config) {
-			cfg.AddScripts(
+		func(cfg cloudinit.CloudConfig) {
+			cfg.AddScript(
 				"echo 'Hello World'",
 				"ifconfig",
 			)
@@ -308,8 +286,8 @@ var ctests = []struct {
 			"install -D -m 644 /dev/null '/etc/apt/apt.conf.d/99proxy'",
 			"printf '%s\\n' '\"Acquire::http::Proxy \"http://10.0.3.1:3142\";' > '/etc/apt/apt.conf.d/99proxy'",
 		}},
-		func(cfg *cloudinit.Config) {
-			cfg.AddTextFile(
+		func(cfg cloudinit.CloudConfig) {
+			cfg.AddRunTextFile(
 				"/etc/apt/apt.conf.d/99proxy",
 				`"Acquire::http::Proxy "http://10.0.3.1:3142";`,
 				0644,
@@ -322,8 +300,8 @@ var ctests = []struct {
 			"install -D -m 644 /dev/null '/dev/nonsense'",
 			"printf %s AAECAw== | base64 -d > '/dev/nonsense'",
 		}},
-		func(cfg *cloudinit.Config) {
-			cfg.AddBinaryFile(
+		func(cfg cloudinit.CloudConfig) {
+			cfg.AddRunBinaryFile(
 				"/dev/nonsense",
 				[]byte{0, 1, 2, 3},
 				0644,
@@ -336,22 +314,12 @@ var ctests = []struct {
 			"install -D -m 644 /dev/null '/etc/apt/apt.conf.d/99proxy'",
 			"printf '%s\\n' '\"Acquire::http::Proxy \"http://10.0.3.1:3142\";' > '/etc/apt/apt.conf.d/99proxy'",
 		}},
-		func(cfg *cloudinit.Config) {
+		func(cfg cloudinit.CloudConfig) {
 			cfg.AddBootTextFile(
 				"/etc/apt/apt.conf.d/99proxy",
 				`"Acquire::http::Proxy "http://10.0.3.1:3142";`,
 				0644,
 			)
-		},
-	},
-	{
-		"SetAptGetWrapper",
-		map[string]interface{}{"apt_get_wrapper": map[string]interface{}{
-			"command": "eatmydata",
-			"enabled": "auto",
-		}},
-		func(cfg *cloudinit.Config) {
-			cfg.SetAptGetWrapper("eatmydata")
 		},
 	},
 }
@@ -373,11 +341,10 @@ func (S) TestOutput(c *gc.C) {
 func (S) TestRunCmds(c *gc.C) {
 	cfg := cloudinit.New()
 	c.Assert(cfg.RunCmds(), gc.HasLen, 0)
-	cfg.AddScripts("a", "b")
-	cfg.AddRunCmdArgs("c", "d")
+	cfg.AddScript("a", "b")
 	cfg.AddRunCmd("e")
 	c.Assert(cfg.RunCmds(), gc.DeepEquals, []interface{}{
-		"a", "b", []string{"c", "d"}, "e",
+		"a", "b", "e",
 	})
 }
 
@@ -387,9 +354,6 @@ func (S) TestPackages(c *gc.C) {
 	cfg.AddPackage("a b c")
 	cfg.AddPackage("d!")
 	expectedPackages := []string{"a b c", "d!"}
-	c.Assert(cfg.Packages(), gc.DeepEquals, expectedPackages)
-	cfg.AddPackageFromTargetRelease("package", "series")
-	expectedPackages = append(expectedPackages, "--target-release series package")
 	c.Assert(cfg.Packages(), gc.DeepEquals, expectedPackages)
 }
 
