@@ -22,6 +22,8 @@ type runHook struct {
 	callbacks     Callbacks
 	runnerFactory runner.Factory
 
+	unlock func()
+
 	name   string
 	runner runner.Runner
 }
@@ -44,7 +46,7 @@ func (rh *runHook) String() string {
 
 // Prepare ensures the hook can be executed.
 // Prepare is part of the Operation interface.
-func (rh *runHook) Prepare(state State) (*State, error) {
+func (rh *runHook) Prepare(state State) (st *State, err error) {
 	name, err := rh.callbacks.PrepareHook(rh.info)
 	if err != nil {
 		return nil, err
@@ -55,6 +57,19 @@ func (rh *runHook) Prepare(state State) (*State, error) {
 	}
 	rh.name = name
 	rh.runner = rnr
+
+	message := RunningHookMessage(rh.name)
+	unlock, err := rh.callbacks.AcquireExecutionLock(message)
+	if err != nil {
+		return nil, err
+	}
+
+	rh.unlock = unlock
+	defer func() {
+		if err != nil && rh.unlock != nil {
+			rh.unlock()
+		}
+	}()
 
 	return stateChange{
 		Kind: RunHook,
@@ -72,11 +87,15 @@ func RunningHookMessage(hookName string) string {
 // Execute is part of the Operation interface.
 func (rh *runHook) Execute(state State) (*State, error) {
 	message := RunningHookMessage(rh.name)
-	unlock, err := rh.callbacks.AcquireExecutionLock(message)
-	if err != nil {
-		return nil, err
+	if rh.unlock != nil {
+		defer rh.unlock()
+	} else {
+		unlock, err := rh.callbacks.AcquireExecutionLock(message)
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
 	}
-	defer unlock()
 
 	if err := rh.beforeHook(); err != nil {
 		return nil, err
@@ -91,7 +110,7 @@ func (rh *runHook) Execute(state State) (*State, error) {
 	ranHook := true
 	step := Done
 
-	err = rh.runner.RunHook(rh.name)
+	err := rh.runner.RunHook(rh.name)
 	cause := errors.Cause(err)
 	switch {
 	case runner.IsMissingHookError(cause):

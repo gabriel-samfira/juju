@@ -17,6 +17,8 @@ type runAction struct {
 	callbacks     Callbacks
 	runnerFactory runner.Factory
 
+	unlock func()
+
 	name   string
 	runner runner.Runner
 }
@@ -30,7 +32,7 @@ func (ra *runAction) String() string {
 // will return ErrSkipExecute. It preserves any hook recorded in the supplied
 // state.
 // Prepare is part of the Operation interface.
-func (ra *runAction) Prepare(state State) (*State, error) {
+func (ra *runAction) Prepare(state State) (st *State, err error) {
 	rnr, err := ra.runnerFactory.NewActionRunner(ra.actionId)
 	if cause := errors.Cause(err); runner.IsBadActionError(cause) {
 		if err := ra.callbacks.FailAction(ra.actionId, err.Error()); err != nil {
@@ -49,6 +51,20 @@ func (ra *runAction) Prepare(state State) (*State, error) {
 	}
 	ra.name = actionData.ActionName
 	ra.runner = rnr
+
+	message := fmt.Sprintf("preparing action %s", ra.name)
+	unlock, err := ra.callbacks.AcquireExecutionLock(message)
+	if err != nil {
+		return nil, err
+	}
+
+	ra.unlock = unlock
+	defer func() {
+		if err != nil && ra.unlock != nil {
+			ra.unlock()
+		}
+	}()
+
 	return stateChange{
 		Kind:     RunAction,
 		Step:     Pending,
@@ -61,17 +77,21 @@ func (ra *runAction) Prepare(state State) (*State, error) {
 // Execute is part of the Operation interface.
 func (ra *runAction) Execute(state State) (*State, error) {
 	message := fmt.Sprintf("running action %s", ra.name)
-	unlock, err := ra.callbacks.AcquireExecutionLock(message)
-	if err != nil {
-		return nil, err
+	if ra.unlock != nil {
+		defer ra.unlock()
+	} else {
+		unlock, err := ra.callbacks.AcquireExecutionLock(message)
+		if err != nil {
+			return nil, err
+		}
+		defer unlock()
 	}
-	defer unlock()
 
 	if err := ra.callbacks.SetExecutingStatus(message); err != nil {
 		return nil, err
 	}
 
-	err = ra.runner.RunAction(ra.name)
+	err := ra.runner.RunAction(ra.name)
 	if err != nil {
 		// This indicates an actual error -- an action merely failing should
 		// be handled inside the Runner, and returned as nil.
