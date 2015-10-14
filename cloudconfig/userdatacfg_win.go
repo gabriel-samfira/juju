@@ -51,7 +51,15 @@ func (w *windowsConfigure) ConfigureBasic() error {
 
 	w.conf.AddScripts(
 		fmt.Sprintf(`%s`, winPowershellHelperFunctions),
+	)
+	if w.icfg.Series != "winnano" {
+		w.conf.AddScripts(
+			fmt.Sprintf(`%s`, addJujudUser),
+			fmt.Sprintf(`%s`, addTgzCapability),
+		)
+	}
 
+	w.conf.AddScripts(
 		// Some providers create a baseDir before this step, but we need to
 		// make sure it exists before applying icacls
 		fmt.Sprintf(`mkdir -Force "%s"`, renderer.FromSlash(baseDir)),
@@ -84,23 +92,7 @@ func (w *windowsConfigure) ConfigureJuju() error {
 	if err != nil {
 		return errors.Annotate(err, "while serializing the tools")
 	}
-	renderer := w.conf.ShellRenderer()
-	w.conf.AddScripts(
-		fmt.Sprintf(`$binDir="%s"`, renderer.FromSlash(w.icfg.JujuTools())),
-		fmt.Sprintf(`mkdir '%s'`, renderer.FromSlash(w.icfg.LogDir)),
-		`mkdir $binDir`,
-		`$WebClient = New-Object System.Net.WebClient`,
-		`[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}`,
-		fmt.Sprintf(`ExecRetry { $WebClient.DownloadFile('%s', "$binDir\tools.tar.gz") }`, w.icfg.Tools.URL),
-		`$dToolsHash = Get-FileSHA256 -FilePath "$binDir\tools.tar.gz"`,
-		fmt.Sprintf(`$dToolsHash > "$binDir\juju%s.sha256"`,
-			w.icfg.Tools.Version),
-		fmt.Sprintf(`if ($dToolsHash.ToLower() -ne "%s"){ Throw "Tools checksum mismatch"}`,
-			w.icfg.Tools.SHA256),
-		fmt.Sprintf(`GUnZip-File -infile $binDir\tools.tar.gz -outdir $binDir`),
-		`rm "$binDir\tools.tar*"`,
-		fmt.Sprintf(`Set-Content $binDir\downloaded-tools.txt '%s'`, string(toolsJson)),
-	)
+	w.downloadAndUnzipTools(toolsJson)
 
 	for _, cmd := range CreateJujuRegistryKeyCmds() {
 		w.conf.AddRunCmd(cmd)
@@ -112,6 +104,48 @@ func (w *windowsConfigure) ConfigureJuju() error {
 		return errors.Trace(err)
 	}
 	return w.addMachineAgentToBoot()
+}
+
+func (w windowsConfigure) downloadAndUnzipTools(toolsJson []byte) {
+	renderer := w.conf.ShellRenderer()
+	w.conf.AddScripts(
+		fmt.Sprintf(`$binDir="%s"`, renderer.FromSlash(w.icfg.JujuTools())),
+		fmt.Sprintf(`mkdir '%s'`, renderer.FromSlash(w.icfg.LogDir)),
+		`mkdir $binDir`,
+	)
+	if w.icfg.Series == "winnano" {
+		w.conf.AddRunCmd(
+			`$tmpBinDir=$binDir.Replace('\', '\\')`,
+			fmt.Sprintf(`ExecRetry { "C:\Cloudbase-Init\Python\python.exe"" -c "from urllib import request; request.urlretrieve('%s', '$tmpBinDir\\tools.tar.gz') }"`, w.icfg.Tools.URL),
+		)
+	} else {
+		w.conf.AddScripts(
+			`$WebClient = New-Object System.Net.WebClient`,
+			`[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}`,
+			fmt.Sprintf(`ExecRetry { $WebClient.DownloadFile('%s', "$binDir\tools.tar.gz") }`, w.icfg.Tools.URL),
+		)
+	}
+	w.conf.AddScripts(
+		`$dToolsHash = Get-FileSHA256 -FilePath "$binDir\tools.tar.gz"`,
+		fmt.Sprintf(`$dToolsHash > "$binDir\juju%s.sha256"`,
+			w.icfg.Tools.Version),
+		fmt.Sprintf(`if ($dToolsHash.ToLower() -ne "%s"){ Throw "Tools checksum mismatch"}`,
+			w.icfg.Tools.SHA256),
+	)
+	if w.icfg.Series == "winnano" {
+		w.conf.AddRunCmd(
+			`$tmpBinDir=$binDir.Replace('\', '\\')`,
+			`& "C:\Cloudbase-Init\Python\python.exe" -c "import tarfile;archive = tarfile.open('$tmpBinDir\\tools.tar.gz');archive.extractall(path='$tmpBinDir')"`,
+		)
+	} else {
+		w.conf.AddRunCmd(
+			fmt.Sprintf(`GUnZip-File -infile $binDir\tools.tar.gz -outdir $binDir`),
+		)
+	}
+	w.conf.AddScripts(
+		`rm "$binDir\tools.tar*"`,
+		fmt.Sprintf(`Set-Content $binDir\downloaded-tools.txt '%s'`, string(toolsJson)),
+	)
 }
 
 // CreateJujuRegistryKey is going to create a juju registry key and set

@@ -233,14 +233,25 @@ func (s *Service) Install() error {
 }
 
 // InstallCommands returns shell commands to install the service.
-func (s *Service) InstallCommands() ([]string, error) {
-	cmd := fmt.Sprintf(serviceInstallCommands[1:],
-		renderer.Quote(s.Service.Name),
-		renderer.Quote(s.Service.Conf.Desc),
-		renderer.Quote(s.Service.Conf.ExecStart),
-		renderer.Quote(s.Service.Name),
-		renderer.Quote(s.Service.Name),
-	)
+func (s *Service) InstallCommands(series string) ([]string, error) {
+	var cmd string
+	if series == "winnano" {
+		cmd = fmt.Sprintf(serviceInstallCommands[1:],
+			renderer.Quote(s.Service.Name),
+			renderer.Quote(s.Service.Conf.Desc),
+			renderer.Quote(s.Service.Conf.ExecStart),
+			renderer.Quote(s.Service.Name),
+			renderer.Quote(s.Service.Name),
+		)
+	} else {
+		cmd = fmt.Sprintf(nanoServiceInstallCommands[1:],
+			renderer.Quote(s.Service.Name),
+			renderer.Quote(s.Service.Conf.Desc),
+			renderer.Quote(s.Service.Conf.ExecStart),
+			renderer.Quote(s.Service.Name),
+			renderer.Quote(s.Service.Name),
+		)
+	}
 	return strings.Split(cmd, "\n"), nil
 }
 
@@ -250,6 +261,10 @@ func (s *Service) StartCommands() ([]string, error) {
 	return []string{cmd}, nil
 }
 
+const nanoServiceInstallCommands = `
+New-Service -Name %s -DependsOn Winmgmt -DisplayName %s %s
+sc.exe failure %s reset=5 actions=restart/1000
+sc.exe failureflag %s 1`
 const serviceInstallCommands = `
 New-Service -Credential $jujuCreds -Name %s -DependsOn Winmgmt -DisplayName %s %s
 sc.exe failure %s reset=5 actions=restart/1000
