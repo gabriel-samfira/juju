@@ -86,6 +86,8 @@ var seriesVersions = map[string]string{
 	"win2012hv":   "win2012hv",
 	"win2012r2":   "win2012r2",
 	"win2012":     "win2012",
+	"win2016":     "win2016",
+	"win2016nano": "win2016nano",
 	"win7":        "win7",
 	"win8":        "win8",
 	"win81":       "win81",
@@ -124,6 +126,7 @@ var windowsVersionMatchOrder = []string{
 	"Windows Server 2012",
 	"Windows Storage Server 2012 R2",
 	"Windows Storage Server 2012",
+	"Windows Server 2016",
 	"Windows 7",
 	"Windows 8.1",
 	"Windows 8",
@@ -140,9 +143,14 @@ var windowsVersions = map[string]string{
 	"Windows Storage Server 2012 R2": "win2012r2",
 	"Windows Storage Server 2012":    "win2012",
 	"Windows 7":                      "win7",
+	"Windows Server 2016":            "win2016",
 	"Windows 8.1":                    "win81",
 	"Windows 8":                      "win8",
 	"Windows 10":                     "win10",
+}
+
+var windowsNanoVersions = map[string]string{
+	"Windows Server 2016": "win2016nano",
 }
 
 var distroInfo = "/usr/share/distro-info/ubuntu.csv"
@@ -162,7 +170,11 @@ func GetOSFromSeries(series string) (OSType, error) {
 	if _, ok := archSeries[series]; ok {
 		return Arch, nil
 	}
-	for _, val := range windowsVersions {
+    lookAt := windowsVersions
+    if isWindowsNano() {
+        lookAt = windowsNanoVersions
+    }
+	for _, val := range lookAt {
 		if val == series {
 			return Windows, nil
 		}

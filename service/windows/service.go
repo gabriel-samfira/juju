@@ -42,6 +42,9 @@ var (
 	// SeAssignPrimaryTokenPrivilege
 	// SeServiceLogonRight
 	jujudUser = ".\\jujud"
+
+    // jujudFallbackUser is the user juju falls back to if the jujudUser does not exist
+    jujudFallbackUser = "LocalSystem"
 )
 
 // IsRunning returns whether or not windows is the local init system.

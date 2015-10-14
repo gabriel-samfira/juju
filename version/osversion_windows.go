@@ -15,6 +15,20 @@ import (
 // to allow overwriting during testing
 var currentVersionKey = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"
 
+func isWindowsNano() bool {
+    k, err := registry.OpenKey(registry.LOCAL_MACHINE, "Software\\Microsoft\\Windows NT\\CurrentVersion\\Server\\ServerLevels", registry.QUERY_VALUE)
+    if err != nil {
+        return false
+    }
+    defer k.Close()
+    
+    s, _, err := k.GetIntegerValue("NanoServer")
+    if err != nil {
+        return false
+    }
+    return s == 1
+}
+
 func getVersionFromRegistry() (string, error) {
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, currentVersionKey, registry.QUERY_VALUE)
 	if err != nil {
@@ -34,12 +48,16 @@ func osVersion() (string, error) {
 	if err != nil {
 		return "unknown", err
 	}
-	if val, ok := windowsVersions[ver]; ok {
+    lookAt := windowsVersions
+    if isWindowsNano() {
+        lookAt = windowsNanoVersions
+    }
+	if val, ok := lookAt[ver]; ok {
 		return val, nil
 	}
 	for _, value := range windowsVersionMatchOrder {
 		if strings.HasPrefix(ver, value) {
-			if val, ok := windowsVersions[value]; ok {
+			if val, ok := lookAt[value]; ok {
 				return val, nil
 			}
 		}

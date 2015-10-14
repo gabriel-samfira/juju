@@ -24,7 +24,7 @@ func init() {
 func main() {
 	isInteractive, err := svc.IsAnInteractiveSession()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error doing interactive check: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -38,7 +38,7 @@ func main() {
 			Args: os.Args,
 		}
 		if err := s.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "service error: %v\n", err)
 			os.Exit(1)
 		}
 		os.Exit(0)

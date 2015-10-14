@@ -335,16 +335,19 @@ func (s *SvcManager) Delete(name string) error {
 
 // Create creates a service with the given config.
 func (s *SvcManager) Create(name string, conf common.Conf) error {
+    svcUser := jujudUser
 	passwd, err := getPassword()
 	if err != nil {
-		return errors.Trace(err)
+        logger.Warningf("Failed reset password for %s. Falling back to %s user", jujudUser, jujudFallbackUser)
+		svcUser = jujudFallbackUser
+        passwd = ""
 	}
 	cfg := mgr.Config{
 		Dependencies:     []string{"Winmgmt"},
 		ErrorControl:     mgr.ErrorSevere,
 		StartType:        mgr.StartAutomatic,
 		DisplayName:      conf.Desc,
-		ServiceStartName: jujudUser,
+		ServiceStartName: svcUser,
 		Password:         passwd,
 	}
 	// mgr.CreateService actually does correct argument escaping itself. There is no

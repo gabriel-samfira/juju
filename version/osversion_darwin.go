@@ -7,6 +7,10 @@ import (
 	"syscall"
 )
 
+func isWindowsNano() bool {
+	return false
+}
+
 func sysctlVersion() (string, error) {
 	return syscall.Sysctl("kern.osrelease")
 }

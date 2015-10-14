@@ -3,6 +3,10 @@
 
 package version
 
+func isWindowsNano() bool {
+	return false
+}
+
 func osVersion() (string, error) {
 	return readSeries()
 }
