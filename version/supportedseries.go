@@ -170,10 +170,10 @@ func GetOSFromSeries(series string) (OSType, error) {
 	if _, ok := archSeries[series]; ok {
 		return Arch, nil
 	}
-    lookAt := windowsVersions
-    if isWindowsNano() {
-        lookAt = windowsNanoVersions
-    }
+	lookAt := windowsVersions
+	if isWindowsNano() {
+		lookAt = windowsNanoVersions
+	}
 	for _, val := range lookAt {
 		if val == series {
 			return Windows, nil
