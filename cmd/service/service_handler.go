@@ -53,6 +53,6 @@ func (s *SystemService) Execute(args []string, changeReq <-chan svc.ChangeReques
 
 // Run runs the service
 func (s *SystemService) Run() error {
-    err := svc.Run(s.Name, s)
+	err := svc.Run(s.Name, s)
 	return err
 }

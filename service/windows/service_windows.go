@@ -335,12 +335,12 @@ func (s *SvcManager) Delete(name string) error {
 
 // Create creates a service with the given config.
 func (s *SvcManager) Create(name string, conf common.Conf) error {
-    svcUser := jujudUser
+	svcUser := jujudUser
 	passwd, err := getPassword()
 	if err != nil {
-        logger.Warningf("Failed reset password for %s. Falling back to %s user", jujudUser, jujudFallbackUser)
+		logger.Warningf("Failed reset password for %s. Falling back to %s user", jujudUser, jujudFallbackUser)
 		svcUser = jujudFallbackUser
-        passwd = ""
+		passwd = ""
 	}
 	cfg := mgr.Config{
 		Dependencies:     []string{"Winmgmt"},
