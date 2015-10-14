@@ -15,6 +15,7 @@ import (
 
 	"github.com/juju/juju/juju/osenv"
 	"github.com/juju/juju/juju/paths"
+	"github.com/juju/juju/version"
 )
 
 type aclType string
@@ -52,7 +53,7 @@ func (w *windowsConfigure) ConfigureBasic() error {
 	w.conf.AddScripts(
 		fmt.Sprintf(`%s`, winPowershellHelperFunctions),
 	)
-	if w.icfg.Series != "winnano" {
+	if version.IsNanoSeries(w.icfg.Series) == false {
 		w.conf.AddScripts(
 			fmt.Sprintf(`%s`, addJujudUser),
 			fmt.Sprintf(`%s`, addTgzCapability),
@@ -70,7 +71,9 @@ func (w *windowsConfigure) ConfigureBasic() error {
 
 	// This is necessary for setACLs to work
 	w.conf.AddScripts(`$adminsGroup = (New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-544")).Translate([System.Security.Principal.NTAccount])`)
-	w.conf.AddScripts(setACLs(renderer.FromSlash(baseDir), fileSystem)...)
+	if version.IsNanoSeries(w.icfg.Series) == false {
+		w.conf.AddScripts(setACLs(renderer.FromSlash(baseDir), fileSystem)...)
+	}
 	w.conf.AddScripts(`setx /m PATH "$env:PATH;C:\Juju\bin\"`)
 	noncefile := renderer.Join(dataDir, NonceFile)
 	w.conf.AddScripts(
@@ -113,7 +116,7 @@ func (w windowsConfigure) downloadAndUnzipTools(toolsJson []byte) {
 		fmt.Sprintf(`mkdir '%s'`, renderer.FromSlash(w.icfg.LogDir)),
 		`mkdir $binDir`,
 	)
-	if w.icfg.Series == "winnano" {
+	if version.IsNanoSeries(w.icfg.Series) == true {
 		w.conf.AddRunCmd(
 			`$tmpBinDir=$binDir.Replace('\', '\\')`,
 			fmt.Sprintf(`ExecRetry { "C:\Cloudbase-Init\Python\python.exe"" -c "from urllib import request; request.urlretrieve('%s', '$tmpBinDir\\tools.tar.gz') }"`, w.icfg.Tools.URL),
@@ -132,7 +135,7 @@ func (w windowsConfigure) downloadAndUnzipTools(toolsJson []byte) {
 		fmt.Sprintf(`if ($dToolsHash.ToLower() -ne "%s"){ Throw "Tools checksum mismatch"}`,
 			w.icfg.Tools.SHA256),
 	)
-	if w.icfg.Series == "winnano" {
+	if version.IsNanoSeries(w.icfg.Series) == true {
 		w.conf.AddRunCmd(
 			`$tmpBinDir=$binDir.Replace('\', '\\')`,
 			`& "C:\Cloudbase-Init\Python\python.exe" -c "import tarfile;archive = tarfile.open('$tmpBinDir\\tools.tar.gz');archive.extractall(path='$tmpBinDir')"`,

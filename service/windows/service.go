@@ -15,6 +15,7 @@ import (
 	"github.com/juju/utils/shell"
 
 	"github.com/juju/juju/service/common"
+	"github.com/juju/juju/version"
 )
 
 var (
@@ -235,7 +236,7 @@ func (s *Service) Install() error {
 // InstallCommands returns shell commands to install the service.
 func (s *Service) InstallCommands(series string) ([]string, error) {
 	var cmd string
-	if series == "winnano" {
+	if version.IsNanoSeries(series) {
 		cmd = fmt.Sprintf(serviceInstallCommands[1:],
 			renderer.Quote(s.Service.Name),
 			renderer.Quote(s.Service.Conf.Desc),

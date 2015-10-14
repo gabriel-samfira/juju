@@ -155,6 +155,15 @@ var windowsNanoVersions = map[string]string{
 
 var distroInfo = "/usr/share/distro-info/ubuntu.csv"
 
+func IsNanoSeries(series string) bool {
+	for _, val := range windowsNanoVersions {
+		if val == series {
+			return true
+		}
+	}
+	return false
+}
+
 // GetOSFromSeries will return the operating system based
 // on the series that is passed to it
 func GetOSFromSeries(series string) (OSType, error) {
@@ -170,11 +179,12 @@ func GetOSFromSeries(series string) (OSType, error) {
 	if _, ok := archSeries[series]; ok {
 		return Arch, nil
 	}
-	lookAt := windowsVersions
-	if isWindowsNano() {
-		lookAt = windowsNanoVersions
+	for _, val := range windowsVersions {
+		if val == series {
+			return Windows, nil
+		}
 	}
-	for _, val := range lookAt {
+	for _, val := range windowsNanoVersions {
 		if val == series {
 			return Windows, nil
 		}
