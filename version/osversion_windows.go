@@ -16,17 +16,17 @@ import (
 var currentVersionKey = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"
 
 func isWindowsNano() bool {
-    k, err := registry.OpenKey(registry.LOCAL_MACHINE, "Software\\Microsoft\\Windows NT\\CurrentVersion\\Server\\ServerLevels", registry.QUERY_VALUE)
-    if err != nil {
-        return false
-    }
-    defer k.Close()
-    
-    s, _, err := k.GetIntegerValue("NanoServer")
-    if err != nil {
-        return false
-    }
-    return s == 1
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, "Software\\Microsoft\\Windows NT\\CurrentVersion\\Server\\ServerLevels", registry.QUERY_VALUE)
+	if err != nil {
+		return false
+	}
+	defer k.Close()
+
+	s, _, err := k.GetIntegerValue("NanoServer")
+	if err != nil {
+		return false
+	}
+	return s == 1
 }
 
 func getVersionFromRegistry() (string, error) {
@@ -48,10 +48,10 @@ func osVersion() (string, error) {
 	if err != nil {
 		return "unknown", err
 	}
-    lookAt := windowsVersions
-    if isWindowsNano() {
-        lookAt = windowsNanoVersions
-    }
+	lookAt := windowsVersions
+	if isWindowsNano() {
+		lookAt = windowsNanoVersions
+	}
 	if val, ok := lookAt[ver]; ok {
 		return val, nil
 	}
