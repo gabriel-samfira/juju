@@ -80,7 +80,7 @@ type Service interface {
 
 	// InstallCommands returns the list of commands to run on a
 	// (remote) host to install the service.
-	InstallCommands() ([]string, error)
+	InstallCommands(series string) ([]string, error)
 
 	// StartCommands returns the list of commands to run on a
 	// (remote) host to start the service.

@@ -108,7 +108,7 @@ func (c *baseConfigure) addMachineAgentToBoot() error {
 	c.conf.AddScripts(c.toolsSymlinkCommand(toolsDir))
 
 	name := c.tag.String()
-	cmds, err := svc.InstallCommands()
+	cmds, err := svc.InstallCommands(c.icfg.Series)
 	if err != nil {
 		return errors.Annotatef(err, "cannot make cloud-init init script for the %s agent", name)
 	}

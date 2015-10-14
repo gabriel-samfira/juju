@@ -277,7 +277,7 @@ func shutdownInitCommands(initSystem, series string) ([]string, error) {
 		return nil, errors.Trace(err)
 	}
 
-	cmds, err := svc.InstallCommands()
+	cmds, err := svc.InstallCommands(series)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

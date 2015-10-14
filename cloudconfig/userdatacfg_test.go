@@ -1117,7 +1117,7 @@ JzPMDvZ0fYS30ukCIA1stlJxpFiCXQuFn0nG+jH4Q52FTv8xxBhrbLOFvHRRAiEA
 `[1:])
 
 var windowsCloudinitTests = []cloudinitTest{{
-	cfg: makeNormalConfig("win8").setMachineID("10").mutate(func(cfg *testInstanceConfig) {
+	cfg: makeNormalConfig("winnano").setMachineID("10").mutate(func(cfg *testInstanceConfig) {
 		cfg.MongoInfo.Info.CACert = "CA CERT\n" + string(serverCert)
 		cfg.APIInfo.CACert = "CA CERT\n" + string(serverCert)
 	}),
@@ -1129,7 +1129,7 @@ func (*cloudinitSuite) TestWindowsCloudInit(c *gc.C) {
 	for i, test := range windowsCloudinitTests {
 		testConfig := test.cfg.render()
 		c.Logf("test %d", i)
-		ci, err := cloudinit.New("win8")
+		ci, err := cloudinit.New("winnano")
 		c.Assert(err, jc.ErrorIsNil)
 		udata, err := cloudconfig.NewUserdataConfig(&testConfig, ci)
 

@@ -304,7 +304,7 @@ func (s *Service) Install() error {
 }
 
 // InstallCommands returns shell commands to install the service.
-func (s *Service) InstallCommands() ([]string, error) {
+func (s *Service) InstallCommands(series string) ([]string, error) {
 	conf, err := s.render()
 	if err != nil {
 		return nil, err

@@ -58,6 +58,20 @@ function ExecRetry($command, $maxRetryCount = 10, $retryInterval=2)
 	$ErrorActionPreference = $currErrorActionPreference
 }
 
+Function Get-FileSHA256{
+	Param(
+		$FilePath
+	)
+	$hash = [Security.Cryptography.HashAlgorithm]::Create( "SHA256" )
+	$stream = ([IO.StreamReader]$FilePath).BaseStream
+	$res = -join ($hash.ComputeHash($stream) | ForEach { "{0:x2}" -f $_ })
+	$stream.Close()
+	return $res
+}
+
+`
+
+var addJujudUser = `
 function create-account ([string]$accountName, [string]$accountDescription, [string]$password) {
 	$hostname = hostname
 	$comp = [adsi]"WinNT://$hostname"
@@ -463,6 +477,27 @@ function SetUserLogonAsServiceRights($UserName)
 	}
 }
 
+$juju_passwd = Get-RandomPassword 20
+$juju_passwd += "^"
+create-account jujud "Juju Admin user" $juju_passwd
+$hostname = hostname
+$juju_user = "$hostname\jujud"
+
+SetUserLogonAsServiceRights $juju_user
+SetAssignPrimaryTokenPrivilege $juju_user
+
+$path = "HKLM:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList"
+if(!(Test-Path $path)){
+	New-Item -Path $path -force
+}
+New-ItemProperty $path -Name "jujud" -Value 0 -PropertyType "DWord"
+
+$secpasswd = ConvertTo-SecureString $juju_passwd -AsPlainText -Force
+$jujuCreds = New-Object System.Management.Automation.PSCredential ($juju_user, $secpasswd)
+
+`
+
+var addTgzCapability = `
 $Source = @"
 using System;
 using System.Collections.Generic;
@@ -816,35 +851,6 @@ Function GUnZip-File{
 	$in.Close()
 	rm $tempFile
 }
-
-Function Get-FileSHA256{
-	Param(
-		$FilePath
-	)
-	$hash = [Security.Cryptography.HashAlgorithm]::Create( "SHA256" )
-	$stream = ([IO.StreamReader]$FilePath).BaseStream
-	$res = -join ($hash.ComputeHash($stream) | ForEach { "{0:x2}" -f $_ })
-	$stream.Close()
-	return $res
-}
-
-$juju_passwd = Get-RandomPassword 20
-$juju_passwd += "^"
-create-account jujud "Juju Admin user" $juju_passwd
-$hostname = hostname
-$juju_user = "$hostname\jujud"
-
-SetUserLogonAsServiceRights $juju_user
-SetAssignPrimaryTokenPrivilege $juju_user
-
-$path = "HKLM:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList"
-if(!(Test-Path $path)){
-	New-Item -Path $path -force
-}
-New-ItemProperty $path -Name "jujud" -Value 0 -PropertyType "DWord"
-
-$secpasswd = ConvertTo-SecureString $juju_passwd -AsPlainText -Force
-$jujuCreds = New-Object System.Management.Automation.PSCredential ($juju_user, $secpasswd)
 
 `
 

@@ -545,7 +545,7 @@ var createFile = func(filename string, data []byte, perm os.FileMode) error {
 }
 
 // InstallCommands implements Service.
-func (s *Service) InstallCommands() ([]string, error) {
+func (s *Service) InstallCommands(series string) ([]string, error) {
 	if s.NoConf() {
 		return nil, s.errorf(nil, "missing conf")
 	}
