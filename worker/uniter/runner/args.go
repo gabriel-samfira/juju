@@ -5,6 +5,7 @@ package runner
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,6 +58,31 @@ func searchHook(charmDir, hook string) (string, error) {
 	return "", &missingHookError{hook}
 }
 
+var nanoWrapper = `
+Param(
+        [Parameter(Mandatory=$true)]
+        [string]$wrapped
+)
+
+try {
+        . $wrapped
+        if ($LASTEXITCODE) {
+                Throw "status $LASTEXITCODE"
+        }
+} catch {
+        Throw $_
+}
+`
+
+func writeNanoWrapper() string {
+	tmpDir := os.Getenv("TEMP")
+	wrapper := filepath.Join(tmpDir, "wrapper.ps1")
+	if _, err := os.Stat(wrapper); err != nil {
+		_ = ioutil.WriteFile(wrapper, []byte(nanoWrapper), 0755)
+	}
+	return wrapper
+}
+
 // hookCommand constructs an appropriate command to be passed to
 // exec.Command(). The exec package uses cmd.exe as default on windows.
 // cmd.exe does not know how to execute ps1 files by default, and
@@ -70,13 +96,22 @@ func hookCommand(hook string) []string {
 		return []string{hook}
 	}
 	if strings.HasSuffix(hook, ".ps1") {
-		return []string{
-			"powershell.exe",
-			"-NonInteractive",
-			"-ExecutionPolicy",
-			"RemoteSigned",
-			"-File",
-			hook,
+		if version.IsWindowsNano() {
+			wrapper := writeNanoWrapper()
+			return []string{
+				"powershell.exe",
+				wrapper,
+				hook,
+			}
+		} else {
+			return []string{
+				"powershell.exe",
+				"-NonInteractive",
+				"-ExecutionPolicy",
+				"RemoteSigned",
+				"-File",
+				hook,
+			}
 		}
 	}
 	return []string{hook}

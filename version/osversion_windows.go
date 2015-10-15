@@ -15,7 +15,7 @@ import (
 // to allow overwriting during testing
 var currentVersionKey = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"
 
-func isWindowsNano() bool {
+func IsWindowsNano() bool {
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, "Software\\Microsoft\\Windows NT\\CurrentVersion\\Server\\ServerLevels", registry.QUERY_VALUE)
 	if err != nil {
 		return false
@@ -49,7 +49,7 @@ func osVersion() (string, error) {
 		return "unknown", err
 	}
 	lookAt := windowsVersions
-	if isWindowsNano() {
+	if IsWindowsNano() {
 		lookAt = windowsNanoVersions
 	}
 	if val, ok := lookAt[ver]; ok {

@@ -97,7 +97,7 @@ func (w *windowsConfigure) ConfigureJuju() error {
 	}
 	w.downloadAndUnzipTools(toolsJson)
 
-	for _, cmd := range CreateJujuRegistryKeyCmds() {
+	for _, cmd := range CreateJujuRegistryKeyCmds(w.icfg.Series) {
 		w.conf.AddRunCmd(cmd)
 	}
 
@@ -117,9 +117,10 @@ func (w windowsConfigure) downloadAndUnzipTools(toolsJson []byte) {
 		`mkdir $binDir`,
 	)
 	if version.IsNanoSeries(w.icfg.Series) == true {
-		w.conf.AddRunCmd(
+		w.conf.AddScripts(
 			`$tmpBinDir=$binDir.Replace('\', '\\')`,
-			fmt.Sprintf(`ExecRetry { "C:\Cloudbase-Init\Python\python.exe"" -c "from urllib import request; request.urlretrieve('%s', '$tmpBinDir\\tools.tar.gz') }"`, w.icfg.Tools.URL),
+			fmt.Sprintf(`& "C:\Cloudbase-Init\Python\python.exe" -c "from urllib import request; import ssl; ssl._create_default_https_context = ssl._create_unverified_conte
+xt; request.urlretrieve('%s', '$tmpBinDir\\tools.tar.gz')"`, w.icfg.Tools.URL),
 		)
 	} else {
 		w.conf.AddScripts(
@@ -136,7 +137,7 @@ func (w windowsConfigure) downloadAndUnzipTools(toolsJson []byte) {
 			w.icfg.Tools.SHA256),
 	)
 	if version.IsNanoSeries(w.icfg.Series) == true {
-		w.conf.AddRunCmd(
+		w.conf.AddScripts(
 			`$tmpBinDir=$binDir.Replace('\', '\\')`,
 			`& "C:\Cloudbase-Init\Python\python.exe" -c "import tarfile;archive = tarfile.open('$tmpBinDir\\tools.tar.gz');archive.extractall(path='$tmpBinDir')"`,
 		)
@@ -154,23 +155,27 @@ func (w windowsConfigure) downloadAndUnzipTools(toolsJson []byte) {
 // CreateJujuRegistryKey is going to create a juju registry key and set
 // permissions on it such that it's only accessible to administrators
 // It is exported because it is used in an upgrade step
-func CreateJujuRegistryKeyCmds() []string {
+func CreateJujuRegistryKeyCmds(series string) []string {
 	aclCmds := setACLs(osenv.JujuRegistryKey, registryEntry)
+
 	regCmds := []string{
-
-		// Create a registry key for storing juju related information
 		fmt.Sprintf(`New-Item -Path '%s'`, osenv.JujuRegistryKey),
-
-		// Create a JUJU_DEV_FEATURE_FLAGS entry which may or may not be empty.
-		fmt.Sprintf(`New-ItemProperty -Path '%s' -Name '%s'`,
-			osenv.JujuRegistryKey,
-			osenv.JujuFeatureFlagEnvKey),
-		fmt.Sprintf(`Set-ItemProperty -Path '%s' -Name '%s' -Value '%s'`,
-			osenv.JujuRegistryKey,
-			osenv.JujuFeatureFlagEnvKey,
-			featureflag.AsEnvironmentValue()),
 	}
-	return append(regCmds[:1], append(aclCmds, regCmds[1:]...)...)
+
+	regCmds = append(regCmds, fmt.Sprintf(`New-ItemProperty -Path '%s' -Name '%s'`,
+		osenv.JujuRegistryKey,
+		osenv.JujuFeatureFlagEnvKey))
+
+	if version.IsNanoSeries(series) == false {
+		regCmds = append(regCmds, aclCmds...)
+	}
+
+	regCmds = append(regCmds, fmt.Sprintf(`Set-ItemProperty -Path '%s' -Name '%s' -Value '%s'`,
+		osenv.JujuRegistryKey,
+		osenv.JujuFeatureFlagEnvKey,
+		featureflag.AsEnvironmentValue()))
+
+	return regCmds
 }
 
 func setACLs(path string, permType aclType) []string {

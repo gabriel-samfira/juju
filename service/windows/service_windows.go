@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"unsafe"
 
+	wmi "github.com/gabriel-samfira/go-wmi/wmi"
+
 	// https://bugs.launchpad.net/juju-core/+bug/1470820
 	"github.com/gabriel-samfira/sys/windows"
 	"github.com/gabriel-samfira/sys/windows/svc"
@@ -154,44 +156,32 @@ var getPassword = func() (string, error) {
 // the current system. It is defined as a variable to allow us to mock it out
 // for testing
 var listServices = func() (services []string, err error) {
-	host := syscall.StringToUTF16Ptr(".")
-
-	sc, err := windows.OpenSCManager(host, nil, windows.SC_MANAGER_ALL_ACCESS)
-	defer func() {
-		// The close service handle error is less important than others
-		if err == nil {
-			err = windows.CloseServiceHandle(sc)
-		}
-	}()
+	svcs := []string{}
+	con, err := wmi.NewConnection(".", `Root\CIMV2`)
 	if err != nil {
 		return nil, err
 	}
-
-	var needed uint32
-	var returned uint32
-	var resume uint32 = 0
-	var enum []enumService
-
-	for {
-		var buf [512]enumService
-		err := enumServicesStatus(sc, windows.SERVICE_WIN32,
-			windows.SERVICE_STATE_ALL, uintptr(unsafe.Pointer(&buf[0])), uint32(unsafe.Sizeof(buf)), &needed, &returned, &resume)
+	result, err := con.Gwmi("win32_service", []string{}, []wmi.WMIQuery{})
+	if err != nil {
+		return nil, err
+	}
+	aa, err := result.Count()
+	if err != nil {
+		return nil, err
+	}
+	for i := 0; i < aa; i++ {
+		item, err := result.ItemAtIndex(i)
 		if err != nil {
-			if err == windows.ERROR_MORE_DATA {
-				enum = append(enum, buf[:returned]...)
-				continue
-			}
 			return nil, err
 		}
-		enum = append(enum, buf[:returned]...)
-		break
+		name, err := item.GetProperty("Name")
+		if err != nil {
+			return nil, err
+		}
+		n := name.Value()
+		svcs = append(svcs, n.(string))
 	}
-
-	services = make([]string, len(enum))
-	for i, v := range enum {
-		services[i] = v.Name()
-	}
-	return services, nil
+	return svcs, nil
 }
 
 // SvcManager implements ServiceManager interface

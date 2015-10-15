@@ -3,7 +3,7 @@
 
 package version
 
-func isWindowsNano() bool {
+func IsWindowsNano() bool {
 	return false
 }
 

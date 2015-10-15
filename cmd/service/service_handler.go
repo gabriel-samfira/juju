@@ -7,6 +7,8 @@
 package service
 
 import (
+	"io/ioutil"
+
 	"github.com/gabriel-samfira/sys/windows/svc"
 )
 
@@ -54,5 +56,6 @@ func (s *SystemService) Execute(args []string, changeReq <-chan svc.ChangeReques
 // Run runs the service
 func (s *SystemService) Run() error {
 	err := svc.Run(s.Name, s)
+	ioutil.WriteFile("C:/juju.log", []byte(err.Error()), 0755)
 	return err
 }

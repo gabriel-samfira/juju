@@ -7,7 +7,7 @@ import (
 	"syscall"
 )
 
-func isWindowsNano() bool {
+func IsWindowsNano() bool {
 	return false
 }
 

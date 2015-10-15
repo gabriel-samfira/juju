@@ -148,7 +148,7 @@ var execRunCommands = exec.RunCommands
 // not especially easy to use, this is done using the exact same steps used in cloudinit
 func addJujuRegKey(context Context) error {
 	if version.Current.OS == version.Windows {
-		cmds := cloudconfig.CreateJujuRegistryKeyCmds()
+		cmds := cloudconfig.CreateJujuRegistryKeyCmds("bogus")
 		_, err := execRunCommands(exec.RunParams{
 			Commands: strings.Join(cmds, "\n"),
 		})

@@ -4,10 +4,13 @@
 package runner
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/juju/cmd"
 	"github.com/juju/errors"
@@ -149,42 +152,78 @@ func (runner *runner) runCharmHookWithLocation(hookName, charmLocation string) e
 	return runner.context.Flush(hookName, err)
 }
 
-func (runner *runner) runCharmHook(hookName string, env []string, charmLocation string) error {
+func (runner *runner) runCharmHook(hookName string, env []string, charmLocation string) (err error) {
 	charmDir := runner.paths.GetCharmDir()
-	hook, err := searchHook(charmDir, filepath.Join(charmLocation, hookName))
+	var hook string
+	hook, err = searchHook(charmDir, filepath.Join(charmLocation, hookName))
 	if err != nil {
 		if IsMissingHookError(err) {
 			// Missing hook is perfectly valid, but worth mentioning.
 			logger.Infof("skipped %q hook (not implemented)", hookName)
 		}
-		return err
+		return
 	}
 	hookCmd := hookCommand(hook)
 	ps := exec.Command(hookCmd[0], hookCmd[1:]...)
 	ps.Env = env
 	ps.Dir = charmDir
-	outReader, outWriter, err := os.Pipe()
-	if err != nil {
+	outReader, outWriter, errW := os.Pipe()
+	if errW != nil {
 		return errors.Errorf("cannot make logging pipe: %v", err)
 	}
-	ps.Stdout = outWriter
-	ps.Stderr = outWriter
+
+	hackReader, hackWriter, errW := os.Pipe()
+	if errW != nil {
+		return errors.Errorf("cannot make logging pipe: %v", err)
+	}
+	hasError := false
+	if version.IsWindowsNano() && strings.HasSuffix(hook, "ps1") {
+		wrt := io.MultiWriter(outWriter, hackWriter)
+		ps.Stdout = wrt
+		ps.Stderr = wrt
+		go func(hasErr *bool) {
+			br := bufio.NewReaderSize(hackReader, 4096)
+			for {
+				line, _, errRead := br.ReadLine()
+				if errRead != nil {
+					break
+				}
+				if strings.HasPrefix(string(line), "System.Management.Automation.RuntimeException") {
+					*hasErr = true
+					return
+				}
+			}
+		}(&hasError)
+	} else {
+		ps.Stdout = outWriter
+		ps.Stderr = outWriter
+	}
+
+	defer func() {
+		if hasError {
+			err = errors.Trace(fmt.Errorf("Hook Returned error"))
+		}
+	}()
+
 	hookLogger := &hookLogger{
 		r:      outReader,
 		done:   make(chan struct{}),
 		logger: runner.getLogger(hookName),
 	}
 	go hookLogger.run()
+
 	err = ps.Start()
-	outWriter.Close()
 	if err == nil {
 		// Record the *os.Process of the hook
 		runner.context.SetProcess(ps.Process)
 		// Block until execution finishes
 		err = ps.Wait()
 	}
+	outWriter.Close()
+	hackWriter.Close()
 	hookLogger.stop()
-	return errors.Trace(err)
+	err = errors.Trace(err)
+	return
 }
 
 func (runner *runner) startJujucServer() (*jujuc.Server, error) {
