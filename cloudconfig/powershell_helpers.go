@@ -58,6 +58,10 @@ function ExecRetry($command, $maxRetryCount = 10, $retryInterval=2)
 	$ErrorActionPreference = $currErrorActionPreference
 }
 
+`
+
+var addFileHash = `
+
 Function Get-FileSHA256{
 	Param(
 		$FilePath

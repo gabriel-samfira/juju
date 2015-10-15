@@ -55,6 +55,7 @@ func (w *windowsConfigure) ConfigureBasic() error {
 	)
 	if version.IsNanoSeries(w.icfg.Series) == false {
 		w.conf.AddScripts(
+			fmt.Sprintf(`%s`, addFileHash),
 			fmt.Sprintf(`%s`, addJujudUser),
 			fmt.Sprintf(`%s`, addTgzCapability),
 		)
@@ -119,23 +120,20 @@ func (w windowsConfigure) downloadAndUnzipTools(toolsJson []byte) {
 	if version.IsNanoSeries(w.icfg.Series) == true {
 		w.conf.AddScripts(
 			`$tmpBinDir=$binDir.Replace('\', '\\')`,
-			fmt.Sprintf(`& "C:\Cloudbase-Init\Python\python.exe" -c "from urllib import request; import ssl; ssl._create_default_https_context = ssl._create_unverified_conte
-xt; request.urlretrieve('%s', '$tmpBinDir\\tools.tar.gz')"`, w.icfg.Tools.URL),
+			fmt.Sprintf(`& "C:\Cloudbase-Init\Python\python.exe" -c "from urllib import request; import ssl; ssl._create_default_https_context = ssl._create_unverified_context; request.urlretrieve('%s', '$tmpBinDir\\tools.tar.gz')"`, w.icfg.Tools.URL),
 		)
 	} else {
 		w.conf.AddScripts(
 			`$WebClient = New-Object System.Net.WebClient`,
 			`[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}`,
 			fmt.Sprintf(`ExecRetry { $WebClient.DownloadFile('%s', "$binDir\tools.tar.gz") }`, w.icfg.Tools.URL),
+			`$dToolsHash = Get-FileSHA256 -FilePath "$binDir\tools.tar.gz"`,
+			fmt.Sprintf(`$dToolsHash > "$binDir\juju%s.sha256"`,
+				w.icfg.Tools.Version),
+			fmt.Sprintf(`if ($dToolsHash.ToLower() -ne "%s"){ Throw "Tools checksum mismatch"}`,
+				w.icfg.Tools.SHA256),
 		)
 	}
-	w.conf.AddScripts(
-		`$dToolsHash = Get-FileSHA256 -FilePath "$binDir\tools.tar.gz"`,
-		fmt.Sprintf(`$dToolsHash > "$binDir\juju%s.sha256"`,
-			w.icfg.Tools.Version),
-		fmt.Sprintf(`if ($dToolsHash.ToLower() -ne "%s"){ Throw "Tools checksum mismatch"}`,
-			w.icfg.Tools.SHA256),
-	)
 	if version.IsNanoSeries(w.icfg.Series) == true {
 		w.conf.AddScripts(
 			`$tmpBinDir=$binDir.Replace('\', '\\')`,
