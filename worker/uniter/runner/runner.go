@@ -183,13 +183,14 @@ func (runner *runner) runCharmHook(hookName string, env []string, charmLocation 
 		ps.Stderr = wrt
 		go func(hasErr *bool) {
 			br := bufio.NewReaderSize(hackReader, 4096)
+            *hasErr = true
 			for {
 				line, _, errRead := br.ReadLine()
 				if errRead != nil {
 					break
 				}
-				if strings.HasPrefix(string(line), "System.Management.Automation.RuntimeException") {
-					*hasErr = true
+				if strings.Contains(string(line), "Errors Count: 0") {
+					*hasErr = false
 					return
 				}
 			}
