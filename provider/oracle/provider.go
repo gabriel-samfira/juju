@@ -109,9 +109,7 @@ func (e environProvider) validateCloudSpec(spec environs.CloudSpec) error {
 // The configuration must have passed through PrepareConfig
 // at some point in its lifecycle.
 // This operation is not performing any expensive operation.
-func (e *environProvider) Open(
-	params environs.OpenParams,
-) (environs.Environ, error) {
+func (e *environProvider) Open(params environs.OpenParams) (environs.Environ, error) {
 
 	logger.Debugf("opening model %q", params.Config.Name())
 
