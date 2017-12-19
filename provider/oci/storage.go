@@ -9,7 +9,7 @@ import (
 	"github.com/juju/juju/storage"
 )
 
-type storageProvider struct {}
+type storageProvider struct{}
 
 var _ storage.Provider = (*storageProvider)(nil)
 

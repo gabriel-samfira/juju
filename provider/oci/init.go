@@ -5,6 +5,10 @@ package oci
 
 import "github.com/juju/juju/environs"
 
+const (
+	providerType = "oci"
+)
+
 func init() {
 	environs.RegisterProvider(providerType, &EnvironProvider{})
 }

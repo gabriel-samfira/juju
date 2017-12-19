@@ -8,7 +8,7 @@ import (
 	"github.com/juju/juju/network"
 )
 
-type Firewall struct {}
+type Firewall struct{}
 
 var _ environs.Firewaller = (*Firewall)(nil)
 

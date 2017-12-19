@@ -7,7 +7,7 @@ import (
 	"github.com/juju/juju/storage"
 )
 
-type volumeSource struct {}
+type volumeSource struct{}
 
 var _ storage.VolumeSource = (*volumeSource)(nil)
 

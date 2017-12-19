@@ -12,7 +12,7 @@ import (
 )
 
 // Environ implements the environs.Networking interface
-type Environ struct {}
+type Environ struct{}
 
 var _ environs.Networking = (*Environ)(nil)
 
