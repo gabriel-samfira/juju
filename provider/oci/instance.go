@@ -5,7 +5,9 @@ package oci
 
 import (
 	"context"
+	"net/http"
 	"sync"
+	"time"
 
 	"github.com/juju/errors"
 	"github.com/juju/juju/status"
@@ -30,6 +32,7 @@ type ociInstance struct {
 	env      *Environ
 	mutex    *sync.Mutex
 	ocid     string
+	etag     *string
 	raw      ociCore.Instance
 }
 
@@ -132,6 +135,40 @@ func (o *ociInstance) Addresses() ([]network.Address, error) {
 	return addresses, nil
 }
 
+func (o *ociInstance) deleteInstanceAndResources() error {
+	err := o.refresh()
+	if errors.IsNotFound(err) {
+		return nil
+	}
+	request := ociCore.TerminateInstanceRequest{
+		InstanceID: &o.ocid,
+		IfMatch:    o.etag,
+	}
+	err = o.env.cli.ComputeClient.TerminateInstance(context.Background(), request)
+	if err != nil {
+		return err
+	}
+	iteration := 0
+	for {
+		if err := o.refresh(); err != nil {
+			if errors.IsNotFound(err) {
+				break
+			}
+			return err
+		}
+		if iteration >= 30 && o.raw.LifecycleState == ociCore.INSTANCE_LIFECYCLE_STATE_RUNNING {
+			logger.Warningf("Instance still in running state after %v checks. breaking loop", iteration)
+			break
+		}
+		<-o.env.clock.After(1 * time.Second)
+		iteration++
+		continue
+	}
+	// TODO(gsamfira): cleanup firewall rules
+	// TODO(gsamfira): cleanup VNIC?
+	return nil
+}
+
 // OpenPorts implements instance.InstanceFirewaller
 func (o *ociInstance) OpenPorts(machineId string, rules []network.IngressRule) error {
 	return nil
@@ -167,6 +204,19 @@ func (o *ociInstance) hardwareCharacteristics() *instance.HardwareCharacteristic
 func (o *ociInstance) refresh() error {
 	o.mutex.Lock()
 	defer o.mutex.Unlock()
-	// TODO(gsamfira): refresh instance info
+	request := ociCore.GetInstanceRequest{
+		InstanceID: &o.ocid,
+	}
+	response, err := o.env.cli.ComputeClient.GetInstance(context.Background(), request)
+	if err != nil {
+		if response.RawResponse != nil && response.RawResponse.StatusCode == http.StatusNotFound {
+			// If we care about 404 errors, this makes it easier to test using
+			// errors.IsNotFound
+			return errors.NotFoundf("instance %s was not found", o.ocid)
+		}
+		return err
+	}
+	o.etag = response.Etag
+	o.raw = response.Instance
 	return nil
 }

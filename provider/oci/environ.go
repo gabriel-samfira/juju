@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/juju/errors"
+	"github.com/juju/utils/arch"
 	"github.com/juju/utils/clock"
 	"github.com/juju/version"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/config"
 	"github.com/juju/juju/environs/instances"
+	"github.com/juju/juju/environs/tags"
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/provider/common"
 	// "github.com/juju/juju/provider/oci/network"
@@ -116,20 +118,19 @@ func (e *Environ) getOciInstances(ids ...instance.Id) ([]*ociInstance, error) {
 
 // Instances implements environs.Environ.
 func (e *Environ) Instances(ids []instance.Id) ([]instance.Instance, error) {
-	// if len(ids) == 0 {
-	// 	return nil, nil
-	// }
-	// instances, err := o.getOciInstances(ids...)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	instances, err := e.getOciInstances(ids...)
+	if err != nil {
+		return nil, err
+	}
 
-	// ret := []instance.Instance{}
-	// for _, val := range instances {
-	// 	ret = append(ret, val)
-	// }
-	// return ret, nil
-	return nil, nil
+	ret := []instance.Instance{}
+	for _, val := range instances {
+		ret = append(ret, val)
+	}
+	return ret, nil
 }
 
 // PrepareForBootstrap implements environs.Environ.
@@ -146,11 +147,16 @@ func (e *Environ) PrepareForBootstrap(ctx environs.BootstrapContext) error {
 
 // Bootstrap implements environs.Environ.
 func (e *Environ) Bootstrap(ctx environs.BootstrapContext, params environs.BootstrapParams) (*environs.BootstrapResult, error) {
-	return nil, nil
+	return common.Bootstrap(ctx, e, params)
 }
 
 // Create implements environs.Environ.
 func (e *Environ) Create(params environs.CreateParams) error {
+	if err := e.cli.Ping(); err != nil {
+		return errors.Trace(err)
+	}
+	// TODO(gsamfira): Create networks, security lists, and possibly containers
+
 	return nil
 }
 
@@ -161,7 +167,20 @@ func (e *Environ) AdoptResources(controllerUUID string, fromVersion version.Numb
 
 // ConstraintsValidator implements environs.Environ.
 func (e *Environ) ConstraintsValidator() (constraints.Validator, error) {
-	return nil, nil
+	// list of unsupported OCI provider constraints
+	unsupportedConstraints := []string{
+		constraints.Container,
+		constraints.CpuPower,
+		constraints.RootDisk,
+		constraints.VirtType,
+		constraints.Tags,
+	}
+
+	validator := constraints.NewValidator()
+	validator.RegisterUnsupported(unsupportedConstraints)
+	validator.RegisterVocabulary(constraints.Arch, []string{arch.AMD64})
+	logger.Infof("Returning constraints validator: %v", validator)
+	return validator, nil
 }
 
 // SetConfig implements environs.Environ.
@@ -184,24 +203,91 @@ func (e *Environ) ecfg() *environConfig {
 	return e.ecfgObj
 }
 
+func (e *Environ) allInstances(tags map[string]string) ([]*ociInstance, error) {
+	compartment := e.ecfg().compartmentID()
+	request := ociCore.ListInstancesRequest{
+		CompartmentID: &compartment,
+	}
+	response, err := e.cli.ComputeClient.ListInstances(context.Background(), request)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	ret := []*ociInstance{}
+	for _, val := range response.Items {
+		missingTag := false
+		for i, j := range tags {
+			tagVal, ok := val.FreeFormTags[i]
+			if !ok || tagVal != j {
+				missingTag = true
+				break
+			}
+		}
+		if missingTag {
+			// One of the tags was not found
+			continue
+		}
+		inst, err := newInstance(val, e)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		ret = append(ret, inst)
+	}
+	return ret, nil
+}
+
+func (e *Environ) allControllerManagedInstances(controllerUUID string) ([]*ociInstance, error) {
+	tags := map[string]string{
+		tags.JujuController: controllerUUID,
+	}
+	return e.allInstances(tags)
+}
+
 // ControllerInstances implements environs.Environ.
 func (e *Environ) ControllerInstances(controllerUUID string) ([]instance.Id, error) {
-	return nil, nil
+	tags := map[string]string{
+		tags.JujuController:   controllerUUID,
+		tags.JujuIsController: "true",
+	}
+	instances, err := e.allInstances(tags)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	ids := []instance.Id{}
+	for _, val := range instances {
+		ids = append(ids, val.Id())
+	}
+	return ids, nil
 }
 
 // Destroy implements environs.Environ.
 func (e *Environ) Destroy() error {
-	return nil
+	return common.Destroy(e)
 }
 
 // DestroyController implements environs.Environ.
 func (e *Environ) DestroyController(controllerUUID string) error {
-	return nil
+	err := e.Destroy()
+	if err != nil {
+		logger.Errorf("Failed to destroy environment through controller: %s", errors.Trace(err))
+	}
+	instances, err := e.allControllerManagedInstances(controllerUUID)
+	if err != nil {
+		if err == environs.ErrNoInstances {
+			return nil
+		}
+		return errors.Trace(err)
+	}
+	ids := make([]instance.Id, len(instances))
+	for i, val := range instances {
+		ids[i] = val.Id()
+	}
+	return e.StopInstances(ids...)
 }
 
 // Provider implements environs.Environ.
 func (e *Environ) Provider() environs.EnvironProvider {
-	return nil
+	return e.p
 }
 
 // StorageProviderTypes implements storage.ProviderRegistry.
@@ -220,8 +306,48 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 }
 
 // StopInstances implements environs.InstanceBroker.
-func (e *Environ) StopInstances(instances ...instance.Id) error {
+func (e *Environ) StopInstances(ids ...instance.Id) error {
+	ociInstances, err := e.getOciInstances(ids...)
+	if err == environs.ErrNoInstances {
+		return nil
+	} else if err != nil {
+		return err
+	}
+
+	logger.Debugf("terminating instances %v", ids)
+	if err := e.terminateInstances(ociInstances...); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func (o *Environ) terminateInstances(instances ...*ociInstance) error {
+	wg := sync.WaitGroup{}
+	wg.Add(len(instances))
+	errs := []error{}
+	instIds := []instance.Id{}
+	for _, oInst := range instances {
+		go func(inst *ociInstance) {
+			defer wg.Done()
+			if err := inst.deleteInstanceAndResources(); err != nil {
+				instIds = append(instIds, inst.Id())
+				errs = append(errs, err)
+			}
+		}(oInst)
+	}
+	wg.Wait()
+	switch len(errs) {
+	case 0:
+		return nil
+	case 1:
+		return errors.Annotatef(errs[0], "failed to stop instance %s", instIds[0])
+	default:
+		return errors.Errorf(
+			"failed to stop instances %s: %s",
+			instIds, errs,
+		)
+	}
 }
 
 // AllInstances implements environs.InstanceBroker.
