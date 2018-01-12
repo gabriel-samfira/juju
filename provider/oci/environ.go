@@ -31,6 +31,7 @@ type Environ struct {
 	p   *EnvironProvider
 
 	clock clock.Clock
+	cfg   *config.Config
 
 	ecfgMutex sync.Mutex
 	ecfgObj   *environConfig
@@ -302,6 +303,32 @@ func (e *Environ) StorageProvider(storage.ProviderType) (storage.Provider, error
 
 // StartInstance implements environs.InstanceBroker.
 func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.StartInstanceResult, error) {
+	var types []instances.InstanceType
+
+	if args.ControllerUUID == "" {
+		return nil, errors.NotFoundf("Controller UUID")
+	}
+
+	// refresh the global image cache
+	// this only hits the API every 30 minutes, otherwise just retrieves
+	// from cache
+	imgCache, err := refreshImageCache(e.cli, e.ecfg().compartmentID())
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// TODO(gsamfira): implement imageCache filter by series, and other attributes
+	// TODO(gsamfira): generate []ImageMetadata from filtered images
+	// TODO(gsamfira): get []InstanceType for filtered images
+	series := args.Tools.OneSeries()
+	arches := args.Tools.Arches()
+
+	types = imgCache.supportedShapes(series)
+	// check if we find an image that is compliant with the
+	// constraints provided in the oracle cloud account
+	if args.ImageMetadata, err = checkImageList(o.client); err != nil {
+		return nil, errors.Trace(err)
+	}
 	return nil, nil
 }
 
@@ -330,7 +357,7 @@ func (o *Environ) terminateInstances(instances ...*ociInstance) error {
 	for _, oInst := range instances {
 		go func(inst *ociInstance) {
 			defer wg.Done()
-			if err := inst.deleteInstanceAndResources(); err != nil {
+			if err := inst.deleteInstance(); err != nil {
 				instIds = append(instIds, inst.Id())
 				errs = append(errs, err)
 			}
@@ -352,7 +379,19 @@ func (o *Environ) terminateInstances(instances ...*ociInstance) error {
 
 // AllInstances implements environs.InstanceBroker.
 func (e *Environ) AllInstances() ([]instance.Instance, error) {
-	return nil, nil
+	tags := map[string]string{
+		tags.JujuModel: e.Config().UUID(),
+	}
+	instances, err := o.allInstances(tags)
+	if err != nil {
+		return nil, err
+	}
+
+	ret := []instance.Instance{}
+	for i, val := range instances {
+		ret = append(ret, val)
+	}
+	return ret, nil
 }
 
 // MaintainInstance implements environs.InstanceBroker.
@@ -362,12 +401,15 @@ func (e *Environ) MaintainInstance(args environs.StartInstanceParams) error {
 
 // Config implements environs.ConfigGetter.
 func (e *Environ) Config() *config.Config {
-	return nil
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+	return e.cfg
 }
 
 // PrecheckInstance implements environs.InstancePrechecker.
 func (e *Environ) PrecheckInstance(environs.PrecheckInstanceParams) error {
-	return nil
+	var i instances.InstanceTypesWithCostMetadata
+	return i, nil
 }
 
 // InstanceTypes implements environs.InstancePrechecker.

@@ -1,21 +1,51 @@
 package oci
 
-type InstanceType string
+import (
+	"context"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/juju/errors"
+	jujuos "github.com/juju/utils/os"
+	"github.com/juju/utils/series"
+
+	"github.com/juju/juju/environs/instances"
+
+	ociCore "github.com/oracle/oci-go-sdk/core"
+)
 
 const (
 	BareMetal      InstanceType = "metal"
-	VirtualMachine InstanceType = "virtual"
+	VirtualMachine InstanceType = "vm"
+	GPUMachine     InstanceType = "gpu"
+
+	// ImageTypeVM should be run on a virtual instance
+	ImageTypeVM ImageType = "vm"
+	// ImageTypeBM should be run on bare metal
+	ImageTypeBM ImageType = "metal"
+	// ImageTypeGPU should be run on an instance with attached GPUs
+	ImageTypeGPU ImageType = "gpu"
+	// ImageTypeGeneric should work on any type of instance (bare metal or virtual)
+	ImageTypeGeneric ImageType = "generic"
+
+	windowsOS = "Windows"
+	centOS    = "CentOS"
+	ubuntuOS  = "Canonical Ubuntu"
 )
 
-// ShapeSpec holds information about a shapes resource allocation
-type ShapeSpec struct {
-	// Cpus is the number of CPU cores available to the instance
-	Cpus int
-	// Memory is the amount of RAM available to the instance
-	Memory int
-	Type   InstanceType
+var windowsVersions = map[string]string{
+	"Server 2008 R2 Standard": "win2008r2",
+	"Server 2012 R2 Standard": "win2012r2",
 }
 
+// shapeSpecs is a map containing resource information
+// about each shape. Unfortunately the API simply returns
+// the name of the shape and nothing else. For details see:
+// https://cloud.oracle.com/infrastructure/pricing
+// https://cloud.oracle.com/infrastructure/compute/pricing
 var shapeSpecs = map[string]ShapeSpec{
 	"VM.Standard1.1": ShapeSpec{
 		Cpus:   1,
@@ -76,32 +106,50 @@ var shapeSpecs = map[string]ShapeSpec{
 		Cpus:   4,
 		Memory: 61440,
 		Type:   VirtualMachine,
+		Tags: []string{
+			"denseio",
+		},
 	},
 	"VM.DenseIO1.8": ShapeSpec{
 		Cpus:   8,
 		Memory: 122880,
 		Type:   VirtualMachine,
+		Tags: []string{
+			"denseio",
+		},
 	},
 	"VM.DenseIO2.8": ShapeSpec{
 		Cpus:   8,
 		Memory: 122880,
 		Type:   VirtualMachine,
+		Tags: []string{
+			"denseio",
+		},
 	},
 	"VM.DenseIO1.16": ShapeSpec{
 		Cpus:   16,
 		Memory: 245760,
 		Type:   VirtualMachine,
+		Tags: []string{
+			"denseio",
+		},
 	},
 
 	"VM.DenseIO2.16": ShapeSpec{
 		Cpus:   16,
 		Memory: 245760,
 		Type:   VirtualMachine,
+		Tags: []string{
+			"denseio",
+		},
 	},
 	"VM.DenseIO2.24": ShapeSpec{
 		Cpus:   24,
 		Memory: 327680,
 		Type:   VirtualMachine,
+		Tags: []string{
+			"denseio",
+		},
 	},
 	"BM.Standard1.36": ShapeSpec{
 		Cpus:   36,
@@ -117,15 +165,345 @@ var shapeSpecs = map[string]ShapeSpec{
 		Cpus:   36,
 		Memory: 524288,
 		Type:   BareMetal,
+		Tags: []string{
+			"highio",
+		},
 	},
 	"BM.DenseIO1.36": ShapeSpec{
 		Cpus:   1,
 		Memory: 7168,
 		Type:   BareMetal,
+		Tags: []string{
+			"denseio",
+		},
 	},
 	"BM.DenseIO2.52": ShapeSpec{
 		Cpus:   52,
 		Memory: 786432,
 		Type:   BareMetal,
+		Tags: []string{
+			"denseio",
+		},
 	},
+	"BM.GPU2.2": ShapeSpec{
+		Cpus:   28,
+		Gpus:   2,
+		Memory: 196608,
+		Type:   GPUMachine,
+		Tags: []string{
+			"denseio",
+		},
+	},
+}
+
+var globalImageCache = &imageCache{}
+var cacheMutex = &sync.Mutex{}
+
+// ShapeSpec holds information about a shapes resource allocation
+type ShapeSpec struct {
+	// Cpus is the number of CPU cores available to the instance
+	Cpus int
+	// Gpus is the number of GPUs available to this instance
+	Gpus int
+	// Memory is the amount of RAM available to the instance
+	Memory int
+	Type   InstanceType
+	Tags   []string
+}
+
+type InstanceType string
+type ImageType string
+
+type ImageVersion struct {
+	TimeStamp time.Time
+	Revision  int
+}
+
+func NewImageVersion(img ociCore.Image) (ImageVersion, error) {
+	if img.DisplayName == nil {
+		return nil, fmt.Errorf("image does not have a display bane")
+	}
+	fields := strings.Split(*img.DisplayName, "-")
+	if len(fields) < 2 {
+		return nil, fmt.Errorf("invalid image display name")
+	}
+	timeStamp, err := time.Parse("2006.01.02", fields[len(fields)-2])
+	if err != nil {
+		return nil, err
+	}
+
+	revision, err := strconv.Atoi(fields[len(fields)-1])
+
+	if err != nil {
+		return nil, err
+	}
+	return ImageVersion{
+		timeStamp: timeStamp,
+		revision:  revision,
+	}, nil
+}
+
+type InstanceImage struct {
+	// ImageType determins which type of image this is. Valid values are:
+	// vm, baremetal and generic
+	ImageType ImageType
+	// Id is the provider ID of the image
+	Id string
+	// Series is the series as known by juju
+	Series string
+	// Version is the version of the image
+	Version ImageVersion
+	// Raw stores the core.Image object
+	Raw ociCore.Image
+
+	// CompartmentID is the compartment Id where this image is available
+	CompartmentID *string
+
+	// InstanceTypes holds a list of shapes compatible with this image
+	InstanceTypes []instances.InstanceType
+}
+
+func (i *InstanceImage) SetInstanceTypes(types []instances.InstanceType) {
+	for idx, val := range types {
+		virtType := types[idx].VirtType
+		imgType := string(i.ImageType)
+		if virtType != nil && ImageType(*virtType) == ImageTypeGeneric {
+			types[i].VirtType = &imgType
+		}
+	}
+	i.InstanceTypes = types
+}
+
+// byVersion sorts shapes by version number
+type byVersion []InstanceImage
+
+func (t byVersion) Len() int {
+	return len(t)
+}
+
+func (t byVersion) Swap(i, j int) {
+	t[i], t[j] = t[j], t[i]
+}
+
+func (t byVersion) Less(i, j int) bool {
+	if t[i].Version.TimeStamp.Before(t[i].Version.TimeStamp.Before) {
+		return true
+	}
+	if t[i].Version.TimeStamp.Equal(t[j].Version.TimeStamp.Before) {
+		if t[i].Version.Revision < t[j].Version.Revision {
+			return true
+		}
+	}
+	return false
+}
+
+type imageCache struct {
+	images map[string][]InstanceImage
+
+	lastRefresh time.Time
+}
+
+func (i *imageCache) isStale() bool {
+	threshold := i.lastRefresh.Add(30 * time.Minute)
+	now := time.Now()
+	if now.After(threshold) {
+		return true
+	}
+	return false
+}
+
+func (i imageCache) supportedShapes(series string) []instances.InstanceType {
+	matches := map[string]int{}
+	ret := []instances.InstanceType{}
+	// TODO(gsamfira): Find a better way for this.
+	if instImg, ok := i.images[series]; ok {
+		for _, img := range instImg {
+			for _, instType := range img.InstanceTypes {
+				if _, ok := matches[instType.Name]; !ok {
+					matches[instType.Name] = 1
+					ret = append(ret, instType...)
+				}
+			}
+		}
+	}
+	return ret
+}
+
+func newImageCache(images map[string][]InstanceImage) *imageCache {
+	now := time.Now()
+	return &imageCache{
+		images:      images,
+		lastRefresh: now,
+	}
+}
+
+func getImageType(img ociCore.Image) ImageType {
+	name := strings.ToLower(*img.DisplayName)
+	if strings.Contains(name, "-vm-") {
+		return ImageTypeVM
+	}
+	if strings.Contains(name, "-bm-") {
+		return ImageTypeBM
+	}
+	if strings.Contains(name, "-gpu-") {
+		return ImageTypeGPU
+	}
+	return ImageTypeGeneric
+}
+
+func getCentOSSeries(img ociCore.Image) (string, error) {
+	if img.OperatingSystemVersion == nil || *img.OperatingSystem != centOS {
+		return "", fmt.Errorf("invalid Operating system")
+	}
+	splitVersion := strings.Split(*img.OperatingSystemVersion, ".")
+	if len(splitVersion) < 1 {
+		return "", fmt.Errorf("invalid centOS version: %v", *img.OperatingSystemVersion)
+	}
+	tmpVersion := fmt.Sprintf("%s%s", strings.ToLower(*img.OperatingSystem), splitVersion[0])
+
+	// call series.CentOSVersionSeries to validate that the version
+	// of CentOS is supported by juju
+	return series.CentOSVersionSeries(tmpVersion)
+}
+
+func NewInstanceImage(img ociCore.Image, compartmentID *string) (InstanceImage, error) {
+	var imgSeries string
+	var err error
+	switch osVersion := *img.OperatingSystem; osVersion {
+	case windowsOS:
+		tmp := fmt.Sprintf("%s %s", *img.OperatingSystem, *img.OperatingSystemVersion)
+		imgSeries, err = series.WindowsVersionSeries(tmp)
+	case centOS:
+		imgSeries, err = getCentOSSeries(img)
+	case ubuntuOS:
+		imgSeries, err = series.VersionSeries(*img.OperatingSystemVersion)
+	default:
+		return nil, errors.NotSupportedf("os %s is not supported", osVersion)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	imgType := InstanceImage{
+		ImageType:     getImageType(img),
+		Id:            *img.ID,
+		Series:        imgSeries,
+		Raw:           img,
+		CompartmentID: compartmentID,
+	}
+
+	version, err := NewImageVersion(img)
+	if err != nil {
+		return nil, err
+	}
+	imgType.Version = version
+
+	return imgType, nil
+}
+
+func instanceTypes(c ociClient, compartmentID, imageID *string) ([]instances.InstanceType, error) {
+	if c == nil {
+		return nil, errors.Errorf("cannot use nil client")
+	}
+
+	request := ociCore.ListShapesRequest{
+		CompartmentID: compartmentID,
+		ImageID:       imageID,
+	}
+	// fetch all shapes from the provider
+	shapes, err := c.ComputeClient.ListShapes(context.Background(), request)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// convert shapes to InstanceType
+	arch := []string{"amd64"}
+	types := make([]instances.InstanceType, len(shapes.Items), len(shapes.Items))
+	for key, val := range shapes.Result {
+		spec, ok := shapeSpecs[*val.Shape]
+		if !ok {
+			logger.Warningf("shape %s does not have a mapping", *val.Shape)
+			continue
+		}
+		instanceType := string(spec.Type)
+		types[key].Name = *val.Shape
+		types[key].Arches = arch
+		types[key].Mem = spec.Memory
+		types[key].CpuCores = uint64(spec.Cpus)
+		// root disk size is not configurable in OCI at the time of this writing
+		// You get a 50 GB disk.
+		types[key].RootDisk = RootDiskSize
+		// its not really virtualization type. We have just 3 types of images:
+		// bare metal, virtual and generic (works on metal and VM).
+		types[key].VirtType = &instanceType
+	}
+
+	return types, nil
+}
+
+func refreshImageCache(cli ociClient, compartmentID *string) (*imageCache, error) {
+	cacheMutex.Lock()
+	defer cacheMutex.Unlock()
+
+	if globalImageCache.isStale() == false {
+		return globalImageCache, nil
+	}
+
+	request := ociCore.ListImagesRequest{
+		CompartmentID: &compartmentID,
+	}
+	response, err := cli.ComputeClient.ListImages(context.Background(), request)
+	if err != nil {
+		return nil, err
+	}
+
+	images := map[string][]InstanceImage{}
+
+	for _, val := range response.Items {
+		instTypes, err := instanceTypes(cli, compartmentID, val.ID)
+		if err != nil {
+			return nil, err
+		}
+		img, err := NewInstanceImage(val, compartmentID)
+		if err != nil {
+			if !series.IsUnknownSeriesVersionError(err) && !errors.IsNotSupported(err) {
+				return nil, err
+			}
+			continue
+		}
+		img.SetInstanceTypes(instTypes)
+		images[img.Series] = append(images[img.Series], img)
+	}
+	globalImageCache = &imageCache{
+		images:      images,
+		lastRefresh: time.Now(),
+	}
+	return globalImageCache
+}
+
+func fetchImageList(c ociClient, compartmentID *string) ([]*imagemetadata.ImageMetadata, error) {
+	if c == nil {
+		return nil, errors.NotFoundf("oci client")
+	}
+
+	request := ociCore.ListImagesRequest{
+		CompartmentID: compartmentID,
+	}
+
+	response, err := c.ComputeClient.ListImages(context.Background(), request)
+	if err != nil {
+		return nil, err
+	}
+
+	images := []*imagemetadata.ImageMetadata{}
+	for _, val := range response.Items {
+		osVersion := *val.OperatingSystemVersion
+		version, err := series.VersionSeries(*val.OperatingSystemVersion)
+		metadata := imagemetadata.ImageMetadata{
+			Arch:    "amd64",
+			Id:      *val.ID,
+			Version: "",
+		}
+	}
+
 }

@@ -135,7 +135,7 @@ func (o *ociInstance) Addresses() ([]network.Address, error) {
 	return addresses, nil
 }
 
-func (o *ociInstance) deleteInstanceAndResources() error {
+func (o *ociInstance) deleteInstance() error {
 	err := o.refresh()
 	if errors.IsNotFound(err) {
 		return nil
