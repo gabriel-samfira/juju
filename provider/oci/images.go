@@ -15,6 +15,7 @@ import (
 
 	"github.com/juju/juju/environs/imagemetadata"
 	"github.com/juju/juju/environs/instances"
+	"github.com/juju/juju/provider/oci/common"
 
 	ociCore "github.com/oracle/oci-go-sdk/core"
 )
@@ -262,7 +263,7 @@ type InstanceImage struct {
 }
 
 func (i *InstanceImage) SetInstanceTypes(types []instances.InstanceType) {
-	for idx, val := range types {
+	for idx, _ := range types {
 		virtType := types[idx].VirtType
 		imgType := string(i.ImageType)
 		if virtType != nil && ImageType(*virtType) == ImageTypeGeneric {
@@ -317,7 +318,14 @@ func (i imageCache) imageMetadata(series string) []*imagemetadata.ImageMetadata 
 
 	for _, val := range i.images {
 		if val.Series == series {
-			imgMeta := &imagemetadata.ImageMetadata{}
+			imgMeta := &imagemetadata.ImageMetadata{
+				Id:   val.Id,
+				Arch: "amd64",
+				// TODO(gsamfira): add region name?
+				// RegionName: region,
+				Version:  val.Series,
+				VirtType: string(val.ImageType),
+			}
 			metadata = append(metadata, imgMeta)
 		}
 	}
@@ -412,8 +420,8 @@ func NewInstanceImage(img ociCore.Image, compartmentID *string) (imgType Instanc
 	return imgType, nil
 }
 
-func instanceTypes(c *ociClient, compartmentID, imageID *string) ([]instances.InstanceType, error) {
-	if c == nil {
+func instanceTypes(cli common.ApiClient, compartmentID, imageID *string) ([]instances.InstanceType, error) {
+	if cli == nil {
 		return nil, errors.Errorf("cannot use nil client")
 	}
 
@@ -422,7 +430,7 @@ func instanceTypes(c *ociClient, compartmentID, imageID *string) ([]instances.In
 		ImageID:       imageID,
 	}
 	// fetch all shapes from the provider
-	shapes, err := c.ComputeClient.ListShapes(context.Background(), request)
+	shapes, err := cli.ListShapes(context.Background(), request)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -452,7 +460,7 @@ func instanceTypes(c *ociClient, compartmentID, imageID *string) ([]instances.In
 	return types, nil
 }
 
-func refreshImageCache(cli *ociClient, compartmentID *string) (*imageCache, error) {
+func refreshImageCache(cli common.ApiClient, compartmentID *string) (*imageCache, error) {
 	cacheMutex.Lock()
 	defer cacheMutex.Unlock()
 
@@ -463,7 +471,7 @@ func refreshImageCache(cli *ociClient, compartmentID *string) (*imageCache, erro
 	request := ociCore.ListImagesRequest{
 		CompartmentID: compartmentID,
 	}
-	response, err := cli.ComputeClient.ListImages(context.Background(), request)
+	response, err := cli.ListImages(context.Background(), request)
 	if err != nil {
 		return nil, err
 	}
@@ -492,29 +500,38 @@ func refreshImageCache(cli *ociClient, compartmentID *string) (*imageCache, erro
 	return globalImageCache, nil
 }
 
-// func fetchImageList(c *ociClient, compartmentID *string) ([]*imagemetadata.ImageMetadata, error) {
-// 	if c == nil {
-// 		return nil, errors.NotFoundf("oci client")
-// 	}
+// findInstanceSpec returns an *InstanceSpec, imagelist name
+// satisfying the supplied instanceConstraint
+func findInstanceSpec(
+	allImageMetadata []*imagemetadata.ImageMetadata,
+	instanceType []instances.InstanceType,
+	ic *instances.InstanceConstraint,
+) (*instances.InstanceSpec, string, error) {
 
-// 	request := ociCore.ListImagesRequest{
-// 		CompartmentID: compartmentID,
-// 	}
+	logger.Debugf("received %d image(s): %v", len(allImageMetadata), allImageMetadata)
+	version, err := series.SeriesVersion(ic.Series)
+	if err != nil {
+		return nil, "", errors.Trace(err)
+	}
 
-// 	response, err := c.ComputeClient.ListImages(context.Background(), request)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+	filtered := []*imagemetadata.ImageMetadata{}
+	// Filter by series. imgCache.supportedShapes() and
+	// imgCache.imageMetadata() will return filtered values
+	// by series already. This additional filtering is done
+	// in case someone wants to use this function with values
+	// not returned by the above two functions
+	for _, val := range allImageMetadata {
+		if val.Version != version {
+			continue
+		}
+		filtered = append(filtered, val)
+	}
 
-// 	images := []*imagemetadata.ImageMetadata{}
-// 	for _, val := range response.Items {
-// 		osVersion := *val.OperatingSystemVersion
-// 		version, err := series.VersionSeries(*val.OperatingSystemVersion)
-// 		metadata := imagemetadata.ImageMetadata{
-// 			Arch:    "amd64",
-// 			Id:      *val.ID,
-// 			Version: "",
-// 		}
-// 	}
+	images := instances.ImageMetadataToImages(filtered)
+	spec, err := instances.FindInstanceSpec(images, ic, instanceType)
+	if err != nil {
+		return nil, "", errors.Trace(err)
+	}
 
-// }
+	return spec, spec.Image.Id, nil
+}

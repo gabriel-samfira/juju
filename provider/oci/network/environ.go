@@ -9,12 +9,29 @@ import (
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/network"
+
+	"github.com/juju/juju/provider/oci/common"
+)
+
+const (
+	// DefaultAddressSpace is the subnet to use for the default juju VCN
+	// An individual subnet will be created from this class, for each
+	// availability domain.
+	DefaultAddressSpace = "10.0.0.0/8"
 )
 
 // Environ implements the environs.Networking interface
-type Environ struct{}
+type Environ struct {
+	cli common.ApiClient
+}
 
 var _ environs.Networking = (*Environ)(nil)
+
+func NewNetworkEnviron(cli common.ApiClient) (environs.Networking, error) {
+	return &Environ{
+		cli: cli,
+	}, nil
+}
 
 // Subnets is defined on the environs.Networking interface.
 func (e Environ) Subnets(id instance.Id, subnets []network.Id) ([]network.SubnetInfo, error) {

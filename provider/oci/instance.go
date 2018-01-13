@@ -84,7 +84,7 @@ func (o *ociInstance) getInstanceVnicAttachments() (ociCore.ListVnicAttachmentsR
 		InstanceID:    o.raw.ID,
 	}
 	ctx := context.Background()
-	response, err := o.env.cli.ComputeClient.ListVnicAttachments(ctx, request)
+	response, err := o.env.cli.ListVnicAttachments(ctx, request)
 	if err != nil {
 		return ociCore.ListVnicAttachmentsResponse{}, errors.Trace(err)
 	}
@@ -99,7 +99,7 @@ func (o *ociInstance) getInstanceVnics(vnics []ociCore.VnicAttachment) ([]ociCor
 		request := ociCore.GetVnicRequest{
 			VnicID: vnicID,
 		}
-		response, err := o.env.cli.VirtualNetwork.GetVnic(context.Background(), request)
+		response, err := o.env.cli.GetVnic(context.Background(), request)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -144,7 +144,7 @@ func (o *ociInstance) deleteInstance() error {
 		InstanceID: &o.ocid,
 		IfMatch:    o.etag,
 	}
-	err = o.env.cli.ComputeClient.TerminateInstance(context.Background(), request)
+	err = o.env.cli.TerminateInstance(context.Background(), request)
 	if err != nil {
 		return err
 	}
@@ -207,7 +207,7 @@ func (o *ociInstance) refresh() error {
 	request := ociCore.GetInstanceRequest{
 		InstanceID: &o.ocid,
 	}
-	response, err := o.env.cli.ComputeClient.GetInstance(context.Background(), request)
+	response, err := o.env.cli.GetInstance(context.Background(), request)
 	if err != nil {
 		if response.RawResponse != nil && response.RawResponse.StatusCode == http.StatusNotFound {
 			// If we care about 404 errors, this makes it easier to test using

@@ -21,10 +21,10 @@ import (
 	"github.com/juju/juju/cloud"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/config"
+	providerCommon "github.com/juju/juju/provider/oci/common"
+	providerNet "github.com/juju/juju/provider/oci/network"
+	// ociNet "github.com/juju/juju/provider/oci/network"
 
-	ociCommon "github.com/oracle/oci-go-sdk/common"
-	ociCore "github.com/oracle/oci-go-sdk/core"
-	ociIdentity "github.com/oracle/oci-go-sdk/identity"
 	"gopkg.in/ini.v1"
 )
 
@@ -92,36 +92,6 @@ func (o *EnvironProvider) ConfigDefaults() schema.Defaults {
 	return configDefaults
 }
 
-func newClient(provider ociCommon.ConfigurationProvider) (*ociClient, error) {
-	computeClient, err := ociCore.NewComputeClientWithConfigurationProvider(provider)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	blockStorage, err := ociCore.NewBlockstorageClientWithConfigurationProvider(provider)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	virtualNetwork, err := ociCore.NewVirtualNetworkClientWithConfigurationProvider(provider)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	ident, err := ociIdentity.NewIdentityClientWithConfigurationProvider(provider)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return &ociClient{
-		ComputeClient:  computeClient,
-		BlockStorage:   blockStorage,
-		VirtualNetwork: virtualNetwork,
-		Identity:       ident,
-		ConfigProvider: provider,
-	}, nil
-}
-
 // credentialSection holds the keys present in one section of the OCI
 // config file, as created by the OCI command line. This is only used
 // during credential detection
@@ -168,19 +138,6 @@ var credentialSchema = map[cloud.AuthType]cloud.CredentialSchema{
 			},
 		},
 	},
-}
-
-// newJujuconfigProvider returns a new ociCommon.ConfigurationProvider
-// This is to allow us to mock later in testing
-var newJujuconfigProvider = func(user, tenant, keyFile, fingerprint, passphrase, region string) ociCommon.ConfigurationProvider {
-	return &jujuConfigProvider{
-		keyFile:        keyFile,
-		keyFingerprint: fingerprint,
-		passphrase:     passphrase,
-		tenancyOCID:    tenant,
-		userOCID:       user,
-		region:         region,
-	}
 }
 
 // Version implements environs.EnvironProvider.
@@ -232,12 +189,22 @@ func (e *EnvironProvider) Open(params environs.OpenParams) (environs.Environ, er
 
 	creds := params.Cloud.Credential.Attributes()
 
-	provider := newJujuconfigProvider(
+	provider := providerCommon.NewJujuConfigProvider(
 		creds["user"], creds["tenancy"],
 		creds["key-file"], creds["fingerprint"],
 		creds["pass-phrase"], creds["region"])
 
-	client, err := newClient(provider)
+	client, err := providerCommon.NewOciClient(provider)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	netEnviron, err := providerNet.NewNetworkEnviron(client)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	firewaller, err := providerNet.NewFirewaller(client)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -247,6 +214,9 @@ func (e *EnvironProvider) Open(params environs.OpenParams) (environs.Environ, er
 		p:     e,
 		clock: clock.WallClock,
 	}
+
+	env.Networking = netEnviron
+	env.Firewaller = firewaller
 
 	if err := env.SetConfig(params.Config); err != nil {
 		return nil, err

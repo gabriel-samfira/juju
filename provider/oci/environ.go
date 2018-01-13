@@ -12,6 +12,7 @@ import (
 	"github.com/juju/utils/clock"
 	"github.com/juju/version"
 
+	// "github.com/juju/juju/cloudconfig/instancecfg"
 	"github.com/juju/juju/constraints"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/config"
@@ -19,15 +20,20 @@ import (
 	"github.com/juju/juju/environs/tags"
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/provider/common"
-	// "github.com/juju/juju/provider/oci/network"
+	providerCommon "github.com/juju/juju/provider/oci/common"
+	// providerCommon "github.com/juju/juju/provider/oci/network"
 	"github.com/juju/juju/storage"
+	// "github.com/juju/juju/tools"
 
 	ociCore "github.com/oracle/oci-go-sdk/core"
 	ociIdentity "github.com/oracle/oci-go-sdk/identity"
 )
 
 type Environ struct {
-	cli *ociClient
+	environs.Networking
+	environs.Firewaller
+
+	cli providerCommon.ApiClient
 	p   *EnvironProvider
 
 	clock clock.Clock
@@ -40,10 +46,12 @@ type Environ struct {
 var _ common.ZonedEnviron = (*Environ)(nil)
 var _ storage.ProviderRegistry = (*Environ)(nil)
 var _ environs.Environ = (*Environ)(nil)
+var _ environs.Firewaller = (*Environ)(nil)
+var _ environs.Networking = (*Environ)(nil)
 
 // AvailabilityZones is defined in the common.ZonedEnviron interface
-func (o *Environ) AvailabilityZones() ([]common.AvailabilityZone, error) {
-	ocid, err := o.cli.ConfigProvider.TenancyOCID()
+func (e *Environ) AvailabilityZones() ([]common.AvailabilityZone, error) {
+	ocid, err := e.cli.TenancyOCID()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -51,7 +59,7 @@ func (o *Environ) AvailabilityZones() ([]common.AvailabilityZone, error) {
 		CompartmentID: &ocid,
 	}
 	ctx := context.Background()
-	domains, err := o.cli.Identity.ListAvailabilityDomains(ctx, request)
+	domains, err := e.cli.ListAvailabilityDomains(ctx, request)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -65,8 +73,8 @@ func (o *Environ) AvailabilityZones() ([]common.AvailabilityZone, error) {
 }
 
 // InstanceAvailabilityzoneNames implements common.ZonedEnviron.
-func (o *Environ) InstanceAvailabilityZoneNames(ids []instance.Id) ([]string, error) {
-	instances, err := o.Instances(ids)
+func (e *Environ) InstanceAvailabilityZoneNames(ids []instance.Id) ([]string, error) {
+	instances, err := e.Instances(ids)
 	if err != nil && err != environs.ErrPartialInstances {
 		return nil, err
 	}
@@ -90,7 +98,7 @@ func (e *Environ) getOciInstances(ids ...instance.Id) ([]*ociInstance, error) {
 		CompartmentID: compartmentID,
 	}
 
-	instances, err := e.cli.ComputeClient.ListInstances(context.Background(), request)
+	instances, err := e.cli.ListInstances(context.Background(), request)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -209,7 +217,7 @@ func (e *Environ) allInstances(tags map[string]string) ([]*ociInstance, error) {
 	request := ociCore.ListInstancesRequest{
 		CompartmentID: compartment,
 	}
-	response, err := e.cli.ComputeClient.ListInstances(context.Background(), request)
+	response, err := e.cli.ListInstances(context.Background(), request)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -303,32 +311,80 @@ func (e *Environ) StorageProvider(storage.ProviderType) (storage.Provider, error
 
 // StartInstance implements environs.InstanceBroker.
 func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.StartInstanceResult, error) {
-	// var types []instances.InstanceType
+	// // var types []instances.InstanceType
 
-	if args.ControllerUUID == "" {
-		return nil, errors.NotFoundf("Controller UUID")
-	}
+	// if args.ControllerUUID == "" {
+	// 	return nil, errors.NotFoundf("Controller UUID")
+	// }
 
-	// refresh the global image cache
-	// this only hits the API every 30 minutes, otherwise just retrieves
-	// from cache
+	// // refresh the global image cache
+	// // this only hits the API every 30 minutes, otherwise just retrieves
+	// // from cache
 	// imgCache, err := refreshImageCache(e.cli, e.ecfg().compartmentID())
 	// if err != nil {
 	// 	return nil, errors.Trace(err)
 	// }
 
-	// TODO(gsamfira): implement imageCache filter by series, and other attributes
-	// TODO(gsamfira): generate []ImageMetadata from filtered images
-	// TODO(gsamfira): get []InstanceType for filtered images
+	// // TODO(gsamfira): implement imageCache filter by series, and other attributes
+	// // TODO(gsamfira): generate []ImageMetadata from filtered images
+	// // TODO(gsamfira): get []InstanceType for filtered images
 	// series := args.Tools.OneSeries()
 	// arches := args.Tools.Arches()
 
-	// types = imgCache.supportedShapes(series)
-	// check if we find an image that is compliant with the
-	// constraints provided in the oracle cloud account
-	// if args.ImageMetadata, err = checkImageList(o.client); err != nil {
+	// types := imgCache.supportedShapes(series)
+	// // check if we find an image that is compliant with the
+	// // constraints provided in the oracle cloud account
+	// args.ImageMetadata = imgCache.imageMetadata(series)
+
+	// if args.Constraints.VirtType == nil {
+	// 	defaultType := string(VirtualMachine)
+	// 	args.Constraints.VirtType = &defaultType
+	// }
+
+	// spec, image, err := findInstanceSpec(
+	// 	args.ImageMetadata,
+	// 	types,
+	// 	&instances.InstanceConstraint{
+	// 		Series:      series,
+	// 		Arches:      arches,
+	// 		Constraints: args.Constraints,
+	// 	},
+	// )
+	// if err != nil {
 	// 	return nil, errors.Trace(err)
 	// }
+
+	// tools, err := args.Tools.Match(tools.Filter{Arch: spec.Image.Arch})
+	// if err != nil {
+	// 	return nil, errors.Trace(err)
+	// }
+	// logger.Tracef("agent binaries: %v", tools)
+	// if err = args.InstanceConfig.SetTools(tools); err != nil {
+	// 	return nil, errors.Trace(err)
+	// }
+
+	// if err = instancecfg.FinishInstanceConfig(
+	// 	args.InstanceConfig,
+	// 	e.Config(),
+	// ); err != nil {
+	// 	return nil, errors.Trace(err)
+	// }
+	// hostname := args.InstanceConfig.MachineId
+	// tags := args.InstanceConfig.Tags
+
+	// var apiPort int
+	// var desiredStatus ociCore.InstanceLifecycleStateEnum
+	// // Wait for controller to actually be running
+	// if args.InstanceConfig.Controller != nil {
+	// 	apiPort = args.InstanceConfig.Controller.Config.APIPort()
+	// 	desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_RUNNING
+	// } else {
+	// 	// All ports are the same so pick the first.
+	// 	apiPort = args.InstanceConfig.APIInfo.Ports()[0]
+	// 	desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_STARTING
+	// }
+
+	// TODO(gsamfira): Setup firewall rules for this instance
 	return nil, nil
 }
 
@@ -388,7 +444,7 @@ func (e *Environ) AllInstances() ([]instance.Instance, error) {
 	}
 
 	ret := []instance.Instance{}
-	for i, val := range instances {
+	for _, val := range instances {
 		ret = append(ret, val)
 	}
 	return ret, nil
@@ -408,8 +464,8 @@ func (e *Environ) Config() *config.Config {
 
 // PrecheckInstance implements environs.InstancePrechecker.
 func (e *Environ) PrecheckInstance(environs.PrecheckInstanceParams) error {
-	var i instances.InstanceTypesWithCostMetadata
-	return i, nil
+	// var i instances.InstanceTypesWithCostMetadata
+	return nil
 }
 
 // InstanceTypes implements environs.InstancePrechecker.

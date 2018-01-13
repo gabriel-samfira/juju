@@ -1,4 +1,4 @@
-package oci
+package common
 
 import (
 	"context"
@@ -13,30 +13,6 @@ import (
 	ociIdentity "github.com/oracle/oci-go-sdk/identity"
 )
 
-type ociClient struct {
-	// TODO(gsamfira): See which functions we use from the bellow clients
-	// and create interfaces, to be better able to mock them during testing
-	ComputeClient  ociCore.ComputeClient
-	BlockStorage   ociCore.BlockstorageClient
-	VirtualNetwork ociCore.VirtualNetworkClient
-	Identity       ociIdentity.IdentityClient
-	ConfigProvider ociCommon.ConfigurationProvider
-}
-
-// Ping validates that the client can access the OCI API successfully
-func (o *ociClient) Ping() error {
-	tenancyID, err := o.ConfigProvider.TenancyOCID()
-	if err != nil {
-		return errors.Trace(err)
-	}
-	request := ociIdentity.ListCompartmentsRequest{
-		CompartmentID: &tenancyID,
-	}
-	ctx := context.Background()
-	_, err = o.Identity.ListCompartments(ctx, request)
-	return err
-}
-
 type jujuConfigProvider struct {
 	keyFile        string
 	keyFingerprint string
@@ -44,6 +20,73 @@ type jujuConfigProvider struct {
 	tenancyOCID    string
 	userOCID       string
 	region         string
+}
+
+type ociClient struct {
+	// TODO(gsamfira): See which functions we use from the bellow clients
+	// and create interfaces, to be better able to mock them during testing
+	ociCore.ComputeClient
+	ociCore.BlockstorageClient
+	ociCore.VirtualNetworkClient
+	ociIdentity.IdentityClient
+
+	ociCommon.ConfigurationProvider
+}
+
+// NewJujuConfigProvider returns a new ociCommon.ConfigurationProvider instance
+func NewJujuConfigProvider(user, tenant, keyFile, fingerprint, passphrase, region string) ociCommon.ConfigurationProvider {
+	return &jujuConfigProvider{
+		keyFile:        keyFile,
+		keyFingerprint: fingerprint,
+		passphrase:     passphrase,
+		tenancyOCID:    tenant,
+		userOCID:       user,
+		region:         region,
+	}
+}
+
+func NewOciClient(provider ociCommon.ConfigurationProvider) (ApiClient, error) {
+	computeClient, err := ociCore.NewComputeClientWithConfigurationProvider(provider)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	blockStorage, err := ociCore.NewBlockstorageClientWithConfigurationProvider(provider)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	virtualNetwork, err := ociCore.NewVirtualNetworkClientWithConfigurationProvider(provider)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	ident, err := ociIdentity.NewIdentityClientWithConfigurationProvider(provider)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return &ociClient{
+		computeClient,
+		blockStorage,
+		virtualNetwork,
+		ident,
+		provider,
+	}, nil
+}
+
+// Ping validates that the client can access the OCI API successfully
+func (o *ociClient) Ping() error {
+	tenancyID, err := o.TenancyOCID()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	request := ociIdentity.ListCompartmentsRequest{
+		CompartmentID: &tenancyID,
+	}
+	ctx := context.Background()
+	_, err = o.ListCompartments(ctx, request)
+	return err
 }
 
 func (j jujuConfigProvider) TenancyOCID() (string, error) {
