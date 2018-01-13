@@ -18,6 +18,10 @@ const (
 	// An individual subnet will be created from this class, for each
 	// availability domain.
 	DefaultAddressSpace = "10.0.0.0/8"
+
+	VcnNamePrefix     = "juju-vcn"
+	SecListNamePrefix = "juju-seclist"
+	SubnetNamePrefix  = "juju-subnet"
 )
 
 // Environ implements the environs.Networking interface

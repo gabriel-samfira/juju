@@ -21,7 +21,7 @@ import (
 	"github.com/juju/juju/instance"
 	"github.com/juju/juju/provider/common"
 	providerCommon "github.com/juju/juju/provider/oci/common"
-	// providerCommon "github.com/juju/juju/provider/oci/network"
+	providerNetwork "github.com/juju/juju/provider/oci/network"
 	"github.com/juju/juju/storage"
 	// "github.com/juju/juju/tools"
 
@@ -41,6 +41,13 @@ type Environ struct {
 
 	ecfgMutex sync.Mutex
 	ecfgObj   *environConfig
+
+	vcn     ociCore.Vcn
+	seclist ociCore.SecurityList
+	// subnets contains one subnet for each availability domain
+	// these will get created once the environment is spun up, and
+	// will never change.
+	subnets []ociCore.Subnet
 }
 
 var _ common.ZonedEnviron = (*Environ)(nil)
@@ -159,13 +166,107 @@ func (e *Environ) Bootstrap(ctx environs.BootstrapContext, params environs.Boots
 	return common.Bootstrap(ctx, e, params)
 }
 
+func (e *Environ) vcnName(controllerUUID string) *string {
+	name := fmt.Sprintf("%s-%s", providerNetwork.VcnNamePrefix, controllerUUID)
+	return &name
+}
+
+func (e *Environ) getVcn(controllerUUID string) (ociCore.Vcn, error) {
+	name := e.vcnName(controllerUUID)
+	request := ociCore.ListVcnsRequest{
+		DisplayName:   name,
+		CompartmentID: e.ecfg().compartmentID(),
+	}
+
+	response, err := e.cli.ListVcns(context.Background(), request)
+	if err != nil {
+		return ociCore.Vcn{}, errors.Trace(err)
+	}
+
+	if len(response.Items) == 0 {
+		return ociCore.Vcn{}, errors.NotFoundf("no such VCN: %s", *name)
+	}
+
+	// This should not happen, but due diligence demands we consider this case
+	if len(response.Items) > 1 {
+		for _, val := range response.Items {
+			// NOTE(gsamfira): Display names are not unique. We only care
+			// about VCNs that have been created for this controller.
+			// While we do include the controller UUID in the name of
+			// the VCN, I believe it is worth doing an extra check.
+			if tag, ok := val.FreeFormTags[tags.JujuController]; ok {
+				if tag == controllerUUID {
+					return val, nil
+				}
+			}
+		}
+		return ociCore.Vcn{}, errors.NotFoundf("no such VCN: %s", *name)
+	}
+	return response.Items[0], nil
+}
+
+func (e *Environ) ensureVCN(controllerUUID string) (vcn ociCore.Vcn, err error) {
+	if vcn, err = e.getVcn(controllerUUID); err != nil {
+		if !errors.IsNotFoundError(err) {
+			return
+		}
+	} else {
+		return
+	}
+
+	name := e.getVcn(controllerUUID)
+	logger.Infof("creating new VCN %s", *name)
+	addressSpace := providerNetwork.DefaultAddressSpace
+	vcnDetails := ociCore.CreateVcnDetails{
+		CidrBlock:     &addressSpace,
+		CompartmentID: e.ecfg().compartmentID(),
+		DisplayName:   name,
+		FreeFormTags: map[string]string{
+			tags.JujuController: controllerUUID,
+		},
+	}
+	request := ociCore.CreateVcnRequest{
+		vcnDetails,
+	}
+
+	result, err := e.cli.CreateVcn(context.Background(), request)
+	if err != nil {
+		return
+	}
+	vcn = result.Vcn
+	return
+}
+
+// ensureNetworksAndSubnets creates VCNs, security lists and subnets that will
+// be used throughout the life-cycle of this juju deployment.
+func (e *Environ) ensureNetworksAndSubnets(controllerUUID string) error {
+	vcn, err := e.ensureVCN(controllerUUID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	secList, err := e.ensureSecurityList(controllerUUID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	subnets, err := e.ensureSubnets(vcn, secList, controllerUUID)
+	return err
+}
+
+// cleanupNetworksAndSubnets destroys all subnets, VCNs and security lists that have
+// been used by this juju deployment. This function should only be called when
+// destroying the environment
+func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
+	return nil
+}
+
 // Create implements environs.Environ.
 func (e *Environ) Create(params environs.CreateParams) error {
 	if err := e.cli.Ping(); err != nil {
 		return errors.Trace(err)
 	}
-	// TODO(gsamfira): Create networks, security lists, and possibly containers
-
+	// err := e.ensureNetworksAndSubnets(params.ControllerUUID)
 	return nil
 }
 
@@ -311,78 +412,78 @@ func (e *Environ) StorageProvider(storage.ProviderType) (storage.Provider, error
 
 // StartInstance implements environs.InstanceBroker.
 func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.StartInstanceResult, error) {
-	// // var types []instances.InstanceType
+	// var types []instances.InstanceType
 
-	// if args.ControllerUUID == "" {
-	// 	return nil, errors.NotFoundf("Controller UUID")
-	// }
+	if args.ControllerUUID == "" {
+		return nil, errors.NotFoundf("Controller UUID")
+	}
 
-	// // refresh the global image cache
-	// // this only hits the API every 30 minutes, otherwise just retrieves
-	// // from cache
-	// imgCache, err := refreshImageCache(e.cli, e.ecfg().compartmentID())
-	// if err != nil {
-	// 	return nil, errors.Trace(err)
-	// }
+	// refresh the global image cache
+	// this only hits the API every 30 minutes, otherwise just retrieves
+	// from cache
+	imgCache, err := refreshImageCache(e.cli, e.ecfg().compartmentID())
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
-	// // TODO(gsamfira): implement imageCache filter by series, and other attributes
-	// // TODO(gsamfira): generate []ImageMetadata from filtered images
-	// // TODO(gsamfira): get []InstanceType for filtered images
-	// series := args.Tools.OneSeries()
-	// arches := args.Tools.Arches()
+	// TODO(gsamfira): implement imageCache filter by series, and other attributes
+	// TODO(gsamfira): generate []ImageMetadata from filtered images
+	// TODO(gsamfira): get []InstanceType for filtered images
+	series := args.Tools.OneSeries()
+	arches := args.Tools.Arches()
 
-	// types := imgCache.supportedShapes(series)
-	// // check if we find an image that is compliant with the
-	// // constraints provided in the oracle cloud account
-	// args.ImageMetadata = imgCache.imageMetadata(series)
+	types := imgCache.supportedShapes(series)
+	// check if we find an image that is compliant with the
+	// constraints provided in the oracle cloud account
+	args.ImageMetadata = imgCache.imageMetadata(series)
 
-	// if args.Constraints.VirtType == nil {
-	// 	defaultType := string(VirtualMachine)
-	// 	args.Constraints.VirtType = &defaultType
-	// }
+	if args.Constraints.VirtType == nil {
+		defaultType := string(VirtualMachine)
+		args.Constraints.VirtType = &defaultType
+	}
 
-	// spec, image, err := findInstanceSpec(
-	// 	args.ImageMetadata,
-	// 	types,
-	// 	&instances.InstanceConstraint{
-	// 		Series:      series,
-	// 		Arches:      arches,
-	// 		Constraints: args.Constraints,
-	// 	},
-	// )
-	// if err != nil {
-	// 	return nil, errors.Trace(err)
-	// }
+	spec, image, err := findInstanceSpec(
+		args.ImageMetadata,
+		types,
+		&instances.InstanceConstraint{
+			Series:      series,
+			Arches:      arches,
+			Constraints: args.Constraints,
+		},
+	)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
-	// tools, err := args.Tools.Match(tools.Filter{Arch: spec.Image.Arch})
-	// if err != nil {
-	// 	return nil, errors.Trace(err)
-	// }
-	// logger.Tracef("agent binaries: %v", tools)
-	// if err = args.InstanceConfig.SetTools(tools); err != nil {
-	// 	return nil, errors.Trace(err)
-	// }
+	tools, err := args.Tools.Match(tools.Filter{Arch: spec.Image.Arch})
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	logger.Tracef("agent binaries: %v", tools)
+	if err = args.InstanceConfig.SetTools(tools); err != nil {
+		return nil, errors.Trace(err)
+	}
 
-	// if err = instancecfg.FinishInstanceConfig(
-	// 	args.InstanceConfig,
-	// 	e.Config(),
-	// ); err != nil {
-	// 	return nil, errors.Trace(err)
-	// }
-	// hostname := args.InstanceConfig.MachineId
-	// tags := args.InstanceConfig.Tags
+	if err = instancecfg.FinishInstanceConfig(
+		args.InstanceConfig,
+		e.Config(),
+	); err != nil {
+		return nil, errors.Trace(err)
+	}
+	hostname := args.InstanceConfig.MachineId
+	tags := args.InstanceConfig.Tags
 
-	// var apiPort int
-	// var desiredStatus ociCore.InstanceLifecycleStateEnum
-	// // Wait for controller to actually be running
-	// if args.InstanceConfig.Controller != nil {
-	// 	apiPort = args.InstanceConfig.Controller.Config.APIPort()
-	// 	desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_RUNNING
-	// } else {
-	// 	// All ports are the same so pick the first.
-	// 	apiPort = args.InstanceConfig.APIInfo.Ports()[0]
-	// 	desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_STARTING
-	// }
+	var apiPort int
+	var desiredStatus ociCore.InstanceLifecycleStateEnum
+	// Wait for controller to actually be running
+	if args.InstanceConfig.Controller != nil {
+		apiPort = args.InstanceConfig.Controller.Config.APIPort()
+		desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_RUNNING
+	} else {
+		// All ports are the same so pick the first.
+		apiPort = args.InstanceConfig.APIInfo.Ports()[0]
+		desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_STARTING
+	}
 
 	// TODO(gsamfira): Setup firewall rules for this instance
 	return nil, nil
