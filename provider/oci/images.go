@@ -2,16 +2,18 @@ package oci
 
 import (
 	"context"
-	"sort"
+	// "sort"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/juju/errors"
-	jujuos "github.com/juju/utils/os"
+	// jujuos "github.com/juju/utils/os"
 	"github.com/juju/utils/series"
 
+	"github.com/juju/juju/environs/imagemetadata"
 	"github.com/juju/juju/environs/instances"
 
 	ociCore "github.com/oracle/oci-go-sdk/core"
@@ -35,11 +37,6 @@ const (
 	centOS    = "CentOS"
 	ubuntuOS  = "Canonical Ubuntu"
 )
-
-var windowsVersions = map[string]string{
-	"Server 2008 R2 Standard": "win2008r2",
-	"Server 2012 R2 Standard": "win2012r2",
-}
 
 // shapeSpecs is a map containing resource information
 // about each shape. Unfortunately the API simply returns
@@ -220,27 +217,28 @@ type ImageVersion struct {
 }
 
 func NewImageVersion(img ociCore.Image) (ImageVersion, error) {
+	var imgVersion ImageVersion
 	if img.DisplayName == nil {
-		return nil, fmt.Errorf("image does not have a display bane")
+		return imgVersion, errors.Errorf("image does not have a display bane")
 	}
 	fields := strings.Split(*img.DisplayName, "-")
 	if len(fields) < 2 {
-		return nil, fmt.Errorf("invalid image display name")
+		return imgVersion, errors.Errorf("invalid image display name")
 	}
 	timeStamp, err := time.Parse("2006.01.02", fields[len(fields)-2])
 	if err != nil {
-		return nil, err
+		return imgVersion, err
 	}
 
 	revision, err := strconv.Atoi(fields[len(fields)-1])
 
 	if err != nil {
-		return nil, err
+		return imgVersion, err
 	}
-	return ImageVersion{
-		timeStamp: timeStamp,
-		revision:  revision,
-	}, nil
+
+	imgVersion.TimeStamp = timeStamp
+	imgVersion.Revision = revision
+	return imgVersion, nil
 }
 
 type InstanceImage struct {
@@ -268,7 +266,7 @@ func (i *InstanceImage) SetInstanceTypes(types []instances.InstanceType) {
 		virtType := types[idx].VirtType
 		imgType := string(i.ImageType)
 		if virtType != nil && ImageType(*virtType) == ImageTypeGeneric {
-			types[i].VirtType = &imgType
+			types[idx].VirtType = &imgType
 		}
 	}
 	i.InstanceTypes = types
@@ -286,10 +284,10 @@ func (t byVersion) Swap(i, j int) {
 }
 
 func (t byVersion) Less(i, j int) bool {
-	if t[i].Version.TimeStamp.Before(t[i].Version.TimeStamp.Before) {
+	if t[i].Version.TimeStamp.Before(t[j].Version.TimeStamp) {
 		return true
 	}
-	if t[i].Version.TimeStamp.Equal(t[j].Version.TimeStamp.Before) {
+	if t[i].Version.TimeStamp.Equal(t[j].Version.TimeStamp) {
 		if t[i].Version.Revision < t[j].Version.Revision {
 			return true
 		}
@@ -298,7 +296,9 @@ func (t byVersion) Less(i, j int) bool {
 }
 
 type imageCache struct {
-	images map[string][]InstanceImage
+	images []InstanceImage
+
+	// shapeToInstanceImageMap map[string][]InstanceImage
 
 	lastRefresh time.Time
 }
@@ -312,16 +312,29 @@ func (i *imageCache) isStale() bool {
 	return false
 }
 
+func (i imageCache) imageMetadata(series string) []*imagemetadata.ImageMetadata {
+	var metadata []*imagemetadata.ImageMetadata
+
+	for _, val := range i.images {
+		if val.Series == series {
+			imgMeta := &imagemetadata.ImageMetadata{}
+			metadata = append(metadata, imgMeta)
+		}
+	}
+
+	return metadata
+}
+
 func (i imageCache) supportedShapes(series string) []instances.InstanceType {
 	matches := map[string]int{}
 	ret := []instances.InstanceType{}
 	// TODO(gsamfira): Find a better way for this.
-	if instImg, ok := i.images[series]; ok {
-		for _, img := range instImg {
+	for _, img := range i.images {
+		if img.Series == series {
 			for _, instType := range img.InstanceTypes {
 				if _, ok := matches[instType.Name]; !ok {
 					matches[instType.Name] = 1
-					ret = append(ret, instType...)
+					ret = append(ret, instType)
 				}
 			}
 		}
@@ -329,7 +342,7 @@ func (i imageCache) supportedShapes(series string) []instances.InstanceType {
 	return ret
 }
 
-func newImageCache(images map[string][]InstanceImage) *imageCache {
+func newImageCache(images []InstanceImage) *imageCache {
 	now := time.Now()
 	return &imageCache{
 		images:      images,
@@ -353,11 +366,11 @@ func getImageType(img ociCore.Image) ImageType {
 
 func getCentOSSeries(img ociCore.Image) (string, error) {
 	if img.OperatingSystemVersion == nil || *img.OperatingSystem != centOS {
-		return "", fmt.Errorf("invalid Operating system")
+		return "", errors.NotSupportedf("invalid Operating system")
 	}
 	splitVersion := strings.Split(*img.OperatingSystemVersion, ".")
 	if len(splitVersion) < 1 {
-		return "", fmt.Errorf("invalid centOS version: %v", *img.OperatingSystemVersion)
+		return "", errors.NotSupportedf("invalid centOS version: %v", *img.OperatingSystemVersion)
 	}
 	tmpVersion := fmt.Sprintf("%s%s", strings.ToLower(*img.OperatingSystem), splitVersion[0])
 
@@ -366,9 +379,8 @@ func getCentOSSeries(img ociCore.Image) (string, error) {
 	return series.CentOSVersionSeries(tmpVersion)
 }
 
-func NewInstanceImage(img ociCore.Image, compartmentID *string) (InstanceImage, error) {
+func NewInstanceImage(img ociCore.Image, compartmentID *string) (imgType InstanceImage, err error) {
 	var imgSeries string
-	var err error
 	switch osVersion := *img.OperatingSystem; osVersion {
 	case windowsOS:
 		tmp := fmt.Sprintf("%s %s", *img.OperatingSystem, *img.OperatingSystemVersion)
@@ -378,30 +390,29 @@ func NewInstanceImage(img ociCore.Image, compartmentID *string) (InstanceImage, 
 	case ubuntuOS:
 		imgSeries, err = series.VersionSeries(*img.OperatingSystemVersion)
 	default:
-		return nil, errors.NotSupportedf("os %s is not supported", osVersion)
+		return imgType, errors.NotSupportedf("os %s is not supported", osVersion)
 	}
 
 	if err != nil {
-		return nil, err
+		return imgType, err
 	}
-	imgType := InstanceImage{
-		ImageType:     getImageType(img),
-		Id:            *img.ID,
-		Series:        imgSeries,
-		Raw:           img,
-		CompartmentID: compartmentID,
-	}
+
+	imgType.ImageType = getImageType(img)
+	imgType.Id = *img.ID
+	imgType.Series = imgSeries
+	imgType.Raw = img
+	imgType.CompartmentID = compartmentID
 
 	version, err := NewImageVersion(img)
 	if err != nil {
-		return nil, err
+		return imgType, err
 	}
 	imgType.Version = version
 
 	return imgType, nil
 }
 
-func instanceTypes(c ociClient, compartmentID, imageID *string) ([]instances.InstanceType, error) {
+func instanceTypes(c *ociClient, compartmentID, imageID *string) ([]instances.InstanceType, error) {
 	if c == nil {
 		return nil, errors.Errorf("cannot use nil client")
 	}
@@ -419,7 +430,7 @@ func instanceTypes(c ociClient, compartmentID, imageID *string) ([]instances.Ins
 	// convert shapes to InstanceType
 	arch := []string{"amd64"}
 	types := make([]instances.InstanceType, len(shapes.Items), len(shapes.Items))
-	for key, val := range shapes.Result {
+	for key, val := range shapes.Items {
 		spec, ok := shapeSpecs[*val.Shape]
 		if !ok {
 			logger.Warningf("shape %s does not have a mapping", *val.Shape)
@@ -428,7 +439,7 @@ func instanceTypes(c ociClient, compartmentID, imageID *string) ([]instances.Ins
 		instanceType := string(spec.Type)
 		types[key].Name = *val.Shape
 		types[key].Arches = arch
-		types[key].Mem = spec.Memory
+		types[key].Mem = uint64(spec.Memory)
 		types[key].CpuCores = uint64(spec.Cpus)
 		// root disk size is not configurable in OCI at the time of this writing
 		// You get a 50 GB disk.
@@ -441,7 +452,7 @@ func instanceTypes(c ociClient, compartmentID, imageID *string) ([]instances.Ins
 	return types, nil
 }
 
-func refreshImageCache(cli ociClient, compartmentID *string) (*imageCache, error) {
+func refreshImageCache(cli *ociClient, compartmentID *string) (*imageCache, error) {
 	cacheMutex.Lock()
 	defer cacheMutex.Unlock()
 
@@ -450,14 +461,14 @@ func refreshImageCache(cli ociClient, compartmentID *string) (*imageCache, error
 	}
 
 	request := ociCore.ListImagesRequest{
-		CompartmentID: &compartmentID,
+		CompartmentID: compartmentID,
 	}
 	response, err := cli.ComputeClient.ListImages(context.Background(), request)
 	if err != nil {
 		return nil, err
 	}
 
-	images := map[string][]InstanceImage{}
+	images := []InstanceImage{}
 
 	for _, val := range response.Items {
 		instTypes, err := instanceTypes(cli, compartmentID, val.ID)
@@ -472,38 +483,38 @@ func refreshImageCache(cli ociClient, compartmentID *string) (*imageCache, error
 			continue
 		}
 		img.SetInstanceTypes(instTypes)
-		images[img.Series] = append(images[img.Series], img)
+		images = append(images, img)
 	}
 	globalImageCache = &imageCache{
 		images:      images,
 		lastRefresh: time.Now(),
 	}
-	return globalImageCache
+	return globalImageCache, nil
 }
 
-func fetchImageList(c ociClient, compartmentID *string) ([]*imagemetadata.ImageMetadata, error) {
-	if c == nil {
-		return nil, errors.NotFoundf("oci client")
-	}
+// func fetchImageList(c *ociClient, compartmentID *string) ([]*imagemetadata.ImageMetadata, error) {
+// 	if c == nil {
+// 		return nil, errors.NotFoundf("oci client")
+// 	}
 
-	request := ociCore.ListImagesRequest{
-		CompartmentID: compartmentID,
-	}
+// 	request := ociCore.ListImagesRequest{
+// 		CompartmentID: compartmentID,
+// 	}
 
-	response, err := c.ComputeClient.ListImages(context.Background(), request)
-	if err != nil {
-		return nil, err
-	}
+// 	response, err := c.ComputeClient.ListImages(context.Background(), request)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	images := []*imagemetadata.ImageMetadata{}
-	for _, val := range response.Items {
-		osVersion := *val.OperatingSystemVersion
-		version, err := series.VersionSeries(*val.OperatingSystemVersion)
-		metadata := imagemetadata.ImageMetadata{
-			Arch:    "amd64",
-			Id:      *val.ID,
-			Version: "",
-		}
-	}
+// 	images := []*imagemetadata.ImageMetadata{}
+// 	for _, val := range response.Items {
+// 		osVersion := *val.OperatingSystemVersion
+// 		version, err := series.VersionSeries(*val.OperatingSystemVersion)
+// 		metadata := imagemetadata.ImageMetadata{
+// 			Arch:    "amd64",
+// 			Id:      *val.ID,
+// 			Version: "",
+// 		}
+// 	}
 
-}
+// }

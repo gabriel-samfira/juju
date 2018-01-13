@@ -65,8 +65,9 @@ func (p EnvironProvider) newConfig(cfg *config.Config) (*environConfig, error) {
 	return &environConfig{valid, valid.UnknownAttrs()}, nil
 }
 
-func (c *environConfig) compartmentID() string {
-	return c.attrs["compartment-id"].(string)
+func (c *environConfig) compartmentID() *string {
+	compartmentID := c.attrs["compartment-id"].(string)
+	return &compartmentID
 }
 
 var _ config.ConfigSchemaSource = (*EnvironProvider)(nil)
@@ -252,7 +253,7 @@ func (e *EnvironProvider) Open(params environs.OpenParams) (environs.Environ, er
 	}
 
 	cfg := env.ecfg()
-	if cfg.compartmentID() == "" {
+	if cfg.compartmentID() == nil {
 		return nil, errors.New("compartment-id may not be empty")
 	}
 

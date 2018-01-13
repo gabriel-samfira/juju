@@ -87,7 +87,7 @@ func (e *Environ) getOciInstances(ids ...instance.Id) ([]*ociInstance, error) {
 
 	compartmentID := e.ecfg().compartmentID()
 	request := ociCore.ListInstancesRequest{
-		CompartmentID: &compartmentID,
+		CompartmentID: compartmentID,
 	}
 
 	instances, err := e.cli.ComputeClient.ListInstances(context.Background(), request)
@@ -207,7 +207,7 @@ func (e *Environ) ecfg() *environConfig {
 func (e *Environ) allInstances(tags map[string]string) ([]*ociInstance, error) {
 	compartment := e.ecfg().compartmentID()
 	request := ociCore.ListInstancesRequest{
-		CompartmentID: &compartment,
+		CompartmentID: compartment,
 	}
 	response, err := e.cli.ComputeClient.ListInstances(context.Background(), request)
 	if err != nil {
@@ -303,7 +303,7 @@ func (e *Environ) StorageProvider(storage.ProviderType) (storage.Provider, error
 
 // StartInstance implements environs.InstanceBroker.
 func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.StartInstanceResult, error) {
-	var types []instances.InstanceType
+	// var types []instances.InstanceType
 
 	if args.ControllerUUID == "" {
 		return nil, errors.NotFoundf("Controller UUID")
@@ -312,23 +312,23 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 	// refresh the global image cache
 	// this only hits the API every 30 minutes, otherwise just retrieves
 	// from cache
-	imgCache, err := refreshImageCache(e.cli, e.ecfg().compartmentID())
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
+	// imgCache, err := refreshImageCache(e.cli, e.ecfg().compartmentID())
+	// if err != nil {
+	// 	return nil, errors.Trace(err)
+	// }
 
 	// TODO(gsamfira): implement imageCache filter by series, and other attributes
 	// TODO(gsamfira): generate []ImageMetadata from filtered images
 	// TODO(gsamfira): get []InstanceType for filtered images
-	series := args.Tools.OneSeries()
-	arches := args.Tools.Arches()
+	// series := args.Tools.OneSeries()
+	// arches := args.Tools.Arches()
 
-	types = imgCache.supportedShapes(series)
+	// types = imgCache.supportedShapes(series)
 	// check if we find an image that is compliant with the
 	// constraints provided in the oracle cloud account
-	if args.ImageMetadata, err = checkImageList(o.client); err != nil {
-		return nil, errors.Trace(err)
-	}
+	// if args.ImageMetadata, err = checkImageList(o.client); err != nil {
+	// 	return nil, errors.Trace(err)
+	// }
 	return nil, nil
 }
 
@@ -382,7 +382,7 @@ func (e *Environ) AllInstances() ([]instance.Instance, error) {
 	tags := map[string]string{
 		tags.JujuModel: e.Config().UUID(),
 	}
-	instances, err := o.allInstances(tags)
+	instances, err := e.allInstances(tags)
 	if err != nil {
 		return nil, err
 	}
@@ -401,8 +401,8 @@ func (e *Environ) MaintainInstance(args environs.StartInstanceParams) error {
 
 // Config implements environs.ConfigGetter.
 func (e *Environ) Config() *config.Config {
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
+	e.ecfgMutex.Lock()
+	defer e.ecfgMutex.Unlock()
 	return e.cfg
 }
 
