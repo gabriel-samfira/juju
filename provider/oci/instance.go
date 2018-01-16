@@ -201,6 +201,29 @@ func (o *ociInstance) hardwareCharacteristics() *instance.HardwareCharacteristic
 	return hc
 }
 
+func (o *ociInstance) waitForMachineStatus(state ociCore.InstanceLifecycleStateEnum, timeout time.Duration) error {
+	timer := o.env.clock.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-timer.Chan():
+			return errors.Errorf(
+				"Timed out waiting for instance to transition from %v to %v",
+				o.raw.LifecycleState, state,
+			)
+		case <-o.env.clock.After(10 * time.Second):
+			err := o.refresh()
+			if err != nil {
+				return err
+			}
+			if o.raw.LifecycleState == state {
+				return nil
+			}
+		}
+	}
+}
+
 func (o *ociInstance) refresh() error {
 	o.mutex.Lock()
 	defer o.mutex.Unlock()

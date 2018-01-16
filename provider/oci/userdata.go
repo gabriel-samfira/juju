@@ -4,6 +4,8 @@
 package oci
 
 import (
+	b64 "encoding/base64"
+
 	"github.com/juju/errors"
 	jujuos "github.com/juju/utils/os"
 
@@ -16,10 +18,19 @@ type OCIRenderer struct{}
 
 // Renderer is defined in the renderers.ProviderRenderer interface
 func (OCIRenderer) Render(cfg cloudinit.CloudConfig, os jujuos.OSType) ([]byte, error) {
+	var renderedUdata []byte
+	var b64udata []byte
+	var err error
 	switch os {
 	case jujuos.Ubuntu:
-		return renderers.RenderYAML(cfg)
+		renderedUdata, err = renderers.RenderYAML(cfg)
 	default:
 		return nil, errors.Errorf("Cannot encode userdata for OS: %s", os.String())
 	}
+
+	if err != nil {
+		return nil, err
+	}
+	b64.StdEncoding.Encode(b64udata, renderedUdata)
+	return b64udata, nil
 }

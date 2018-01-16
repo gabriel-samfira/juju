@@ -16,7 +16,9 @@ import (
 	"github.com/juju/utils/clock"
 	"github.com/juju/version"
 
+	"github.com/juju/juju/cloudconfig/cloudinit"
 	"github.com/juju/juju/cloudconfig/instancecfg"
+	"github.com/juju/juju/cloudconfig/providerinit"
 	"github.com/juju/juju/constraints"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/config"
@@ -857,10 +859,10 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 		return nil, errors.NotFoundf("Controller UUID")
 	}
 
-	networks, err := e.ensureNetworksAndSubnets(controllerUUID)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
+	// networks, err := e.ensureNetworksAndSubnets(args.ControllerUUID)
+	// if err != nil {
+	// 	return nil, errors.Trace(err)
+	// }
 	// refresh the global image cache
 	// this only hits the API every 30 minutes, otherwise just retrieves
 	// from cache
@@ -916,21 +918,81 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 	hostname := args.InstanceConfig.MachineId
 	tags := args.InstanceConfig.Tags
 
-	/*
-		var apiPort int
-		var desiredStatus ociCore.InstanceLifecycleStateEnum
-		// Wait for controller to actually be running
-		if args.InstanceConfig.Controller != nil {
-			apiPort = args.InstanceConfig.Controller.Config.APIPort()
-			desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_RUNNING
-		} else {
-			// All ports are the same so pick the first.
-			apiPort = args.InstanceConfig.APIInfo.Ports()[0]
-			desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_STARTING
-		}
-	*/
-	// TODO(gsamfira): Setup firewall rules for this instance
-	return nil, nil
+	// var apiPort int
+	var desiredStatus ociCore.InstanceLifecycleStateEnum
+	// Wait for controller to actually be running
+	if args.InstanceConfig.Controller != nil {
+		// apiPort = args.InstanceConfig.Controller.Config.APIPort()
+		desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_RUNNING
+	} else {
+		// All ports are the same so pick the first.
+		// apiPort = args.InstanceConfig.APIInfo.Ports()[0]
+		desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_STARTING
+	}
+
+	cloudcfg, err := cloudinit.New(series)
+	if err != nil {
+		return nil, errors.Annotate(err, "cannot create cloudinit template")
+	}
+
+	// compose userdata with the cloud config template
+	logger.Debugf("Composing userdata")
+	userData, err := providerinit.ComposeUserData(
+		args.InstanceConfig,
+		cloudcfg,
+		OCIRenderer{},
+	)
+	if err != nil {
+		return nil, errors.Annotate(err, "cannot make user data")
+	}
+
+	// NOTE(gsamfira): Should we make this configurable?
+	// TODO(gsamfira): select Availability Domain and subnet ID
+	assignPublicIp := true
+	instanceDetails := ociCore.LaunchInstanceDetails{
+		AvailabilityDomain: nil,
+		CompartmentID:      e.ecfg().compartmentID(),
+		ImageID:            &image,
+		Shape:              &spec.InstanceType.Name,
+		CreateVnicDetails: &ociCore.CreateVnicDetails{
+			SubnetID:       nil,
+			AssignPublicIp: &assignPublicIp,
+			DisplayName:    &hostname,
+			HostnameLabel:  &hostname,
+		},
+		DisplayName: &hostname,
+		Metadata: map[string]string{
+			"user_data": string(userData),
+		},
+		FreeFormTags: tags,
+	}
+	request := ociCore.LaunchInstanceRequest{
+		LaunchInstanceDetails: instanceDetails,
+	}
+
+	response, err := e.cli.LaunchInstance(context.Background(), request)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	instance, err := newInstance(response.Instance, e)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	machineId := response.Instance.ID
+	timeout := 10 * time.Minute
+	if err := instance.waitForMachineStatus(desiredStatus, timeout); err != nil {
+		return nil, errors.Trace(err)
+	}
+	logger.Infof("started instance %q", machineId)
+
+	result := &environs.StartInstanceResult{
+		Instance: instance,
+		Hardware: instance.hardwareCharacteristics(),
+	}
+
+	return result, nil
 }
 
 // StopInstances implements environs.InstanceBroker.

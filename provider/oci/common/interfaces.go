@@ -24,6 +24,7 @@ type ApiClient interface {
 	GetVnic(ctx context.Context, request ociCore.GetVnicRequest) (response ociCore.GetVnicResponse, err error)
 	TerminateInstance(ctx context.Context, request ociCore.TerminateInstanceRequest) (err error)
 	GetInstance(ctx context.Context, request ociCore.GetInstanceRequest) (response ociCore.GetInstanceResponse, err error)
+	LaunchInstance(ctx context.Context, request ociCore.LaunchInstanceRequest) (response ociCore.LaunchInstanceResponse, err error)
 
 	CreateVcn(ctx context.Context, request ociCore.CreateVcnRequest) (response ociCore.CreateVcnResponse, err error)
 	DeleteVcn(ctx context.Context, request ociCore.DeleteVcnRequest) (err error)
