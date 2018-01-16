@@ -26,13 +26,17 @@ type ApiClient interface {
 	GetInstance(ctx context.Context, request ociCore.GetInstanceRequest) (response ociCore.GetInstanceResponse, err error)
 
 	CreateVcn(ctx context.Context, request ociCore.CreateVcnRequest) (response ociCore.CreateVcnResponse, err error)
+	DeleteVcn(ctx context.Context, request ociCore.DeleteVcnRequest) (err error)
 	ListVcns(ctx context.Context, request ociCore.ListVcnsRequest) (response ociCore.ListVcnsResponse, err error)
+	GetVcn(ctx context.Context, request ociCore.GetVcnRequest) (response ociCore.GetVcnResponse, err error)
 
 	CreateSecurityList(ctx context.Context, request ociCore.CreateSecurityListRequest) (response ociCore.CreateSecurityListResponse, err error)
 	ListSecurityLists(ctx context.Context, request ociCore.ListSecurityListsRequest) (response ociCore.ListSecurityListsResponse, err error)
 	DeleteSecurityList(ctx context.Context, request ociCore.DeleteSecurityListRequest) (err error)
+	GetSecurityList(ctx context.Context, request ociCore.GetSecurityListRequest) (response ociCore.GetSecurityListResponse, err error)
 
 	CreateSubnet(ctx context.Context, request ociCore.CreateSubnetRequest) (response ociCore.CreateSubnetResponse, err error)
 	ListSubnets(ctx context.Context, request ociCore.ListSubnetsRequest) (response ociCore.ListSubnetsResponse, err error)
 	DeleteSubnet(ctx context.Context, request ociCore.DeleteSubnetRequest) (err error)
+	GetSubnet(ctx context.Context, request ociCore.GetSubnetRequest) (response ociCore.GetSubnetResponse, err error)
 }

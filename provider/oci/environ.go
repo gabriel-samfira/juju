@@ -7,7 +7,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"sync"
+	"time"
 
 	"github.com/juju/errors"
 	"github.com/juju/utils/arch"
@@ -175,9 +177,70 @@ func (e *Environ) Bootstrap(ctx environs.BootstrapContext, params environs.Boots
 	return common.Bootstrap(ctx, e, params)
 }
 
+// TODO(gsamfira): Move the networking related bits out of this file
+
 func (e *Environ) vcnName(controllerUUID string) *string {
 	name := fmt.Sprintf("%s-%s", providerNetwork.VcnNamePrefix, controllerUUID)
 	return &name
+}
+
+func (e *Environ) isNotFound(response *http.Response) bool {
+	if response.StatusCode == http.StatusNotFound {
+		return true
+	}
+	return false
+}
+
+// waitForResourceStatus will ping the resource until the fetch function returns true,
+// the timeout is reached, or an error occurs.
+func (o *Environ) waitForResourceStatus(
+	statusFunc func(resID *string) (status string, err error),
+	resId *string, desiredStatus string,
+	timeout time.Duration,
+) error {
+
+	var status string
+	var err error
+	timeoutTimer := o.clock.NewTimer(timeout)
+	defer timeoutTimer.Stop()
+
+	retryTimer := o.clock.NewTimer(0)
+	defer retryTimer.Stop()
+
+	for {
+		select {
+		case <-retryTimer.Chan():
+			status, err = statusFunc(resId)
+			if err != nil {
+				return err
+			}
+			if status == desiredStatus {
+				return nil
+			}
+			retryTimer.Reset(2 * time.Second)
+		case <-timeoutTimer.Chan():
+			return errors.Errorf(
+				"timed out waiting for resource %q to transition to %v. Current status: %q",
+				*resId, desiredStatus, status,
+			)
+		}
+	}
+}
+
+func (e *Environ) getVCNStatus(vcnID *string) (string, error) {
+	request := ociCore.GetVcnRequest{
+		VcnID: vcnID,
+	}
+
+	response, err := e.cli.GetVcn(context.Background(), request)
+	if err != nil {
+		if e.isNotFound(response.RawResponse) {
+			return "", errors.NotFoundf("vcn not found: %s", *vcnID)
+		} else {
+			return "", err
+		}
+	}
+	return string(response.Vcn.LifecycleState), nil
 }
 
 func (e *Environ) getVcn(controllerUUID string) (ociCore.Vcn, error) {
@@ -245,8 +308,31 @@ func (e *Environ) ensureVCN(controllerUUID string) (vcn ociCore.Vcn, err error) 
 	if err != nil {
 		return
 	}
+	err = e.waitForResourceStatus(
+		e.getVCNStatus, result.Vcn.ID,
+		string(ociCore.VCN_LIFECYCLE_STATE_AVAILABLE),
+		5*time.Minute)
+	if err != nil {
+		return
+	}
 	vcn = result.Vcn
 	return
+}
+
+func (e *Environ) getSeclistStatus(resourceID *string) (string, error) {
+	request := ociCore.GetSecurityListRequest{
+		SecurityListID: resourceID,
+	}
+
+	response, err := e.cli.GetSecurityList(context.Background(), request)
+	if err != nil {
+		if e.isNotFound(response.RawResponse) {
+			return "", errors.NotFoundf("seclist not found: %s", *resourceID)
+		} else {
+			return "", err
+		}
+	}
+	return string(response.SecurityList.LifecycleState), nil
 }
 
 func (e *Environ) getSecurityList(controllerUUID string, vcnid *string) (ociCore.SecurityList, error) {
@@ -316,6 +402,14 @@ func (e *Environ) ensureSecurityList(controllerUUID string, vcnid *string) (ociC
 	if err != nil {
 		return ociCore.SecurityList{}, errors.Trace(err)
 	}
+
+	err = e.waitForResourceStatus(
+		e.getSeclistStatus, response.SecurityList.ID,
+		string(ociCore.SECURITY_LIST_LIFECYCLE_STATE_AVAILABLE),
+		5*time.Minute)
+	if err != nil {
+		return ociCore.SecurityList{}, errors.Trace(err)
+	}
 	return response.SecurityList, nil
 }
 
@@ -362,11 +456,74 @@ func (e *Environ) validateCidrBlock(cidr string) (bool, error) {
 }
 
 func (e *Environ) getFreeSubnet(existing map[string]bool) (string, error) {
-	return "", nil
+	ip, _, err := net.ParseCIDR(providerNetwork.DefaultAddressSpace)
+	if err != nil {
+		return "", errors.Trace(err)
+	}
+	to4 := ip.To4()
+	if to4 == nil {
+		return "", errors.Errorf("invalid IPv4 address: %s", providerNetwork.DefaultAddressSpace)
+	}
+
+	for i := 0; i <= 255; i++ {
+		to4[1] = byte(i)
+		subnet := fmt.Sprint("%s/%s", to4.String(), providerNetwork.SubnetPrefixLength)
+		if _, ok := existing[subnet]; ok {
+			continue
+		}
+		existing[subnet] = true
+		return subnet, nil
+	}
+	return "", errors.Errorf("failed to find a free subnet")
+}
+
+func (e *Environ) getSubnetStatus(resourceID *string) (string, error) {
+	request := ociCore.GetSubnetRequest{
+		SubnetID: resourceID,
+	}
+
+	response, err := e.cli.GetSubnet(context.Background(), request)
+	if err != nil {
+		if e.isNotFound(response.RawResponse) {
+			return "", errors.NotFoundf("subnet not found: %s", *resourceID)
+		} else {
+			return "", err
+		}
+	}
+	return string(response.Subnet.LifecycleState), nil
 }
 
 func (e *Environ) createSubnet(controllerUUID, ad, cidr string, vcnID *string, seclists []string) (ociCore.Subnet, error) {
-	return ociCore.Subnet{}, nil
+	displayName := fmt.Sprint("juju-%s-%s", ad, controllerUUID)
+	compartment := e.ecfg().compartmentID()
+	subnetDetails := ociCore.CreateSubnetDetails{
+		AvailabilityDomain: &ad,
+		CidrBlock:          &cidr,
+		CompartmentID:      compartment,
+		VcnID:              vcnID,
+		DisplayName:        &displayName,
+		SecurityListIds:    seclists,
+		FreeFormTags: map[string]string{
+			tags.JujuController: controllerUUID,
+		},
+	}
+
+	request := ociCore.CreateSubnetRequest{
+		CreateSubnetDetails: subnetDetails,
+	}
+
+	response, err := e.cli.CreateSubnet(context.Background(), request)
+	if err != nil {
+		return ociCore.Subnet{}, errors.Trace(err)
+	}
+	err = e.waitForResourceStatus(
+		e.getSubnetStatus, response.Subnet.ID,
+		string(ociCore.SUBNET_LIFECYCLE_STATE_AVAILABLE),
+		5*time.Minute)
+	if err != nil {
+		return ociCore.Subnet{}, errors.Trace(err)
+	}
+	return response.Subnet, nil
 }
 
 func (e *Environ) ensureSubnets(vcn ociCore.Vcn, secList ociCore.SecurityList, controllerUUID string) (map[string][]ociCore.Subnet, error) {
@@ -410,21 +567,20 @@ func (e *Environ) ensureSubnets(vcn ociCore.Vcn, secList ociCore.SecurityList, c
 			}
 		}
 	}
-
 	return allSubnets, nil
 }
 
 // ensureNetworksAndSubnets creates VCNs, security lists and subnets that will
 // be used throughout the life-cycle of this juju deployment.
-func (e *Environ) ensureNetworksAndSubnets(controllerUUID string) error {
+func (e *Environ) ensureNetworksAndSubnets(controllerUUID string) (map[string][]ociCore.Subnet, error) {
 	// if we have the subnets field populated, it means we already checked/created
 	// the necessary resources. Simply return.
 	if e.subnets != nil {
-		return nil
+		return e.subnets, nil
 	}
 	vcn, err := e.ensureVCN(controllerUUID)
 	if err != nil {
-		return errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 
 	// NOTE(gsamfira): There are some limitations at the moment in regards to
@@ -439,22 +595,108 @@ func (e *Environ) ensureNetworksAndSubnets(controllerUUID string) error {
 	// For now, we open all ports until we decide how to properly take care of this.
 	secList, err := e.ensureSecurityList(controllerUUID, vcn.ID)
 	if err != nil {
-		return errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 
 	subnets, err := e.ensureSubnets(vcn, secList, controllerUUID)
 	if err != nil {
-		return errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 	// TODO(gsamfira): should we use a lock here?
 	e.subnets = subnets
-	return nil
+	return e.subnets, nil
 }
 
 // cleanupNetworksAndSubnets destroys all subnets, VCNs and security lists that have
 // been used by this juju deployment. This function should only be called when
-// destroying the environment
+// destroying the environment, and only after destroying any resources that may be attached
+// to a network.
 func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
+
+	if e.subnets == nil {
+		// We may have just started up, so lets see if we have a VCN created
+		vcn, err := e.getVcn(controllerUUID)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				// no VCN was created, we can just return here
+				return nil
+			}
+		}
+
+		allSubnets, err := e.allSubnets(controllerUUID, vcn.ID)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		e.subnets = allSubnets
+	}
+
+	secLists := map[string]bool{}
+	var vcnID *string
+	for _, adSubnets := range e.subnets {
+		for _, subnet := range adSubnets {
+			for _, secListId := range subnet.SecurityListIds {
+				secLists[secListId] = true
+			}
+			if vcnID != nil {
+				if vcnID != subnet.VcnID {
+					return errors.Errorf(
+						"Found a subnet with a different vcnID. This should not happen. Vcn: %s, subnet: %s", *vcnID, *subnet.VcnID)
+				} else {
+					continue
+				}
+			}
+			vcnID = subnet.VcnID
+
+			request := ociCore.DeleteSubnetRequest{
+				SubnetID: subnet.ID,
+			}
+			// we may need to wait for resource to be deleted
+			err := e.cli.DeleteSubnet(context.Background(), request)
+			// Should we attempt to delete all subnets and return an array of errors?
+			if err != nil {
+				return errors.Trace(err)
+			}
+			err = e.waitForResourceStatus(
+				e.getSubnetStatus, subnet.ID,
+				string(ociCore.SUBNET_LIFECYCLE_STATE_TERMINATED),
+				5*time.Minute)
+			if !errors.IsNotFound(err) {
+				return err
+			}
+		}
+	}
+
+	for secList, _ := range secLists {
+		request := ociCore.DeleteSecurityListRequest{
+			SecurityListID: &secList,
+		}
+
+		err := e.cli.DeleteSecurityList(context.Background(), request)
+		if err != nil {
+			return nil
+		}
+		err = e.waitForResourceStatus(
+			e.getSeclistStatus, &secList,
+			string(ociCore.SECURITY_LIST_LIFECYCLE_STATE_TERMINATED),
+			5*time.Minute)
+		if !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	request := ociCore.DeleteVcnRequest{
+		VcnID: vcnID,
+	}
+
+	err := e.cli.DeleteVcn(context.Background(), request)
+
+	err = e.waitForResourceStatus(
+		e.getVCNStatus, vcnID,
+		string(ociCore.VCN_LIFECYCLE_STATE_TERMINATED),
+		5*time.Minute)
+	if !errors.IsNotFound(err) {
+		return err
+	}
 	return nil
 }
 
@@ -615,6 +857,10 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 		return nil, errors.NotFoundf("Controller UUID")
 	}
 
+	networks, err := e.ensureNetworksAndSubnets(controllerUUID)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 	// refresh the global image cache
 	// this only hits the API every 30 minutes, otherwise just retrieves
 	// from cache
@@ -670,18 +916,19 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 	hostname := args.InstanceConfig.MachineId
 	tags := args.InstanceConfig.Tags
 
-	var apiPort int
-	var desiredStatus ociCore.InstanceLifecycleStateEnum
-	// Wait for controller to actually be running
-	if args.InstanceConfig.Controller != nil {
-		apiPort = args.InstanceConfig.Controller.Config.APIPort()
-		desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_RUNNING
-	} else {
-		// All ports are the same so pick the first.
-		apiPort = args.InstanceConfig.APIInfo.Ports()[0]
-		desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_STARTING
-	}
-
+	/*
+		var apiPort int
+		var desiredStatus ociCore.InstanceLifecycleStateEnum
+		// Wait for controller to actually be running
+		if args.InstanceConfig.Controller != nil {
+			apiPort = args.InstanceConfig.Controller.Config.APIPort()
+			desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_RUNNING
+		} else {
+			// All ports are the same so pick the first.
+			apiPort = args.InstanceConfig.APIInfo.Ports()[0]
+			desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_STARTING
+		}
+	*/
 	// TODO(gsamfira): Setup firewall rules for this instance
 	return nil, nil
 }

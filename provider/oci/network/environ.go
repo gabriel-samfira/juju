@@ -19,6 +19,8 @@ const (
 	// availability domain.
 	DefaultAddressSpace = "10.0.0.0/8"
 
+	SubnetPrefixLength = "16"
+
 	VcnNamePrefix     = "juju-vcn"
 	SecListNamePrefix = "juju-seclist"
 	SubnetNamePrefix  = "juju-subnet"
