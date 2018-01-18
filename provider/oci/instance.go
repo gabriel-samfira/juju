@@ -41,16 +41,18 @@ var _ instance.InstanceFirewaller = (*ociInstance)(nil)
 
 // newInstance returns a new oracleInstance
 func newInstance(raw ociCore.Instance, env *Environ) (*ociInstance, error) {
-	if raw.ID != nil || *raw.ID == "" {
+	if raw.ID == nil {
 		return nil, errors.New(
 			"Instance response does not contain an ID",
 		)
 	}
 	mutex := &sync.Mutex{}
+	arch := "amd64"
 	instance := &ociInstance{
 		raw:   raw,
 		mutex: mutex,
 		env:   env,
+		arch:  &arch,
 		ocid:  *raw.ID,
 	}
 
@@ -128,16 +130,52 @@ func (o *ociInstance) Addresses() ([]network.Address, error) {
 			addresses = append(addresses, privateAddress)
 		}
 		if val.Vnic.PublicIp != nil {
-			publicAddress := network.NewScopedAddress(*val.Vnic.PrivateIp, network.ScopePublic)
+			publicAddress := network.NewScopedAddress(*val.Vnic.PublicIp, network.ScopePublic)
 			addresses = append(addresses, publicAddress)
 		}
 	}
 	return addresses, nil
 }
 
+func (o *ociInstance) isTerminating() bool {
+	if o.raw.LifecycleState == ociCore.INSTANCE_LIFECYCLE_STATE_TERMINATED || o.raw.LifecycleState == ociCore.INSTANCE_LIFECYCLE_STATE_TERMINATING {
+		return true
+	}
+	return false
+}
+
+func (o *ociInstance) waitForPublicIP() error {
+	iteration := 0
+	for {
+		addresses, err := o.Addresses()
+		if err != nil {
+			return err
+		}
+		if iteration >= 30 {
+			logger.Warningf("Instance still in running state after %v checks. breaking loop", iteration)
+			break
+		}
+
+		for _, val := range addresses {
+			if val.Scope == network.ScopePublic {
+				logger.Infof("Found public IP: %s", val)
+				return nil
+			}
+		}
+		<-o.env.clock.After(1 * time.Second)
+		iteration++
+		continue
+	}
+	return errors.NotFoundf("failed to find public IP for instance: %s", o.raw.ID)
+}
+
 func (o *ociInstance) deleteInstance() error {
 	err := o.refresh()
 	if errors.IsNotFound(err) {
+		return nil
+	}
+
+	if o.isTerminating() {
 		return nil
 	}
 	request := ociCore.TerminateInstanceRequest{
@@ -155,6 +193,10 @@ func (o *ociInstance) deleteInstance() error {
 				break
 			}
 			return err
+		}
+		logger.Infof("Waiting for machine to transition to Terminating: %s", o.raw.LifecycleState)
+		if o.isTerminating() {
+			break
 		}
 		if iteration >= 30 && o.raw.LifecycleState == ociCore.INSTANCE_LIFECYCLE_STATE_RUNNING {
 			logger.Warningf("Instance still in running state after %v checks. breaking loop", iteration)

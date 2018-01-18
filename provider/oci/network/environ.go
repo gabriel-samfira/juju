@@ -17,14 +17,17 @@ const (
 	// DefaultAddressSpace is the subnet to use for the default juju VCN
 	// An individual subnet will be created from this class, for each
 	// availability domain.
-	DefaultAddressSpace = "10.0.0.0/8"
+	DefaultAddressSpace = "10.0.0.0/16"
 
-	SubnetPrefixLength = "16"
+	SubnetPrefixLength = "24"
 
 	VcnNamePrefix     = "juju-vcn"
 	SecListNamePrefix = "juju-seclist"
 	SubnetNamePrefix  = "juju-subnet"
 )
+
+// TODO(gsamfira): Use "local" instead? make configurable?
+var DnsLabel = "juju"
 
 // Environ implements the environs.Networking interface
 type Environ struct {

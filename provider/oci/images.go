@@ -3,6 +3,7 @@ package oci
 import (
 	"context"
 	// "sort"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -263,13 +264,6 @@ type InstanceImage struct {
 }
 
 func (i *InstanceImage) SetInstanceTypes(types []instances.InstanceType) {
-	for idx, _ := range types {
-		virtType := types[idx].VirtType
-		imgType := string(i.ImageType)
-		if virtType != nil && ImageType(*virtType) == ImageTypeGeneric {
-			types[idx].VirtType = &imgType
-		}
-	}
 	i.InstanceTypes = types
 }
 
@@ -313,11 +307,18 @@ func (i *imageCache) isStale() bool {
 	return false
 }
 
-func (i imageCache) imageMetadata(series string) []*imagemetadata.ImageMetadata {
+func (i imageCache) imageMetadata(series string, defaultVirtType string) []*imagemetadata.ImageMetadata {
 	var metadata []*imagemetadata.ImageMetadata
 
 	for _, val := range i.images {
 		if val.Series == series {
+			if val.ImageType == ImageTypeGeneric {
+				if defaultVirtType != "" {
+					val.ImageType = ImageType(defaultVirtType)
+				} else {
+					val.ImageType = ImageTypeVM
+				}
+			}
 			imgMeta := &imagemetadata.ImageMetadata{
 				Id:   val.Id,
 				Arch: "amd64",
@@ -384,6 +385,7 @@ func getCentOSSeries(img ociCore.Image) (string, error) {
 
 	// call series.CentOSVersionSeries to validate that the version
 	// of CentOS is supported by juju
+	logger.Warningf("Determining CentOS series for: %s", tmpVersion)
 	return series.CentOSVersionSeries(tmpVersion)
 }
 
@@ -392,10 +394,12 @@ func NewInstanceImage(img ociCore.Image, compartmentID *string) (imgType Instanc
 	switch osVersion := *img.OperatingSystem; osVersion {
 	case windowsOS:
 		tmp := fmt.Sprintf("%s %s", *img.OperatingSystem, *img.OperatingSystemVersion)
+		logger.Warningf("Determining Windows series for: %s", tmp)
 		imgSeries, err = series.WindowsVersionSeries(tmp)
 	case centOS:
 		imgSeries, err = getCentOSSeries(img)
 	case ubuntuOS:
+		logger.Warningf("Determining Ubuntu series for: %s", *img.OperatingSystemVersion)
 		imgSeries, err = series.VersionSeries(*img.OperatingSystemVersion)
 	default:
 		return imgType, errors.NotSupportedf("os %s is not supported", osVersion)
@@ -485,7 +489,7 @@ func refreshImageCache(cli common.ApiClient, compartmentID *string) (*imageCache
 		}
 		img, err := NewInstanceImage(val, compartmentID)
 		if err != nil {
-			if !series.IsUnknownSeriesVersionError(err) && !errors.IsNotSupported(err) {
+			if !series.IsUnknownSeriesVersionError(err) && !errors.IsNotSupported(err) && !series.IsUnknownVersionSeriesError(err) {
 				return nil, err
 			}
 			continue
@@ -509,11 +513,6 @@ func findInstanceSpec(
 ) (*instances.InstanceSpec, string, error) {
 
 	logger.Debugf("received %d image(s): %v", len(allImageMetadata), allImageMetadata)
-	version, err := series.SeriesVersion(ic.Series)
-	if err != nil {
-		return nil, "", errors.Trace(err)
-	}
-
 	filtered := []*imagemetadata.ImageMetadata{}
 	// Filter by series. imgCache.supportedShapes() and
 	// imgCache.imageMetadata() will return filtered values
@@ -521,13 +520,18 @@ func findInstanceSpec(
 	// in case someone wants to use this function with values
 	// not returned by the above two functions
 	for _, val := range allImageMetadata {
-		if val.Version != version {
+		if val.Version != ic.Series {
 			continue
 		}
 		filtered = append(filtered, val)
 	}
 
 	images := instances.ImageMetadataToImages(filtered)
+	aa, _ := json.MarshalIndent(images, "", "    ")
+	bb, _ := json.MarshalIndent(ic, "", "    ")
+	cc, _ := json.MarshalIndent(instanceType, "", "    ")
+	logger.Warningf(">>>>> %v --> %v --> %v", images, ic, instanceType)
+	logger.Warningf(">>>>> %s --> %s --> %s", aa, bb, cc)
 	spec, err := instances.FindInstanceSpec(images, ic, instanceType)
 	if err != nil {
 		return nil, "", errors.Trace(err)

@@ -21,6 +21,7 @@ import (
 	"github.com/juju/juju/cloud"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/config"
+	"github.com/juju/juju/instance"
 	providerCommon "github.com/juju/juju/provider/oci/common"
 	providerNet "github.com/juju/juju/provider/oci/network"
 	// ociNet "github.com/juju/juju/provider/oci/network"
@@ -29,6 +30,38 @@ import (
 )
 
 var logger = loggo.GetLogger("juju.provider.oracle")
+
+var cloudSchema = &jsonschema.Schema{
+	Type:     []jsonschema.Type{jsonschema.ObjectType},
+	Required: []string{cloud.RegionsKey, cloud.AuthTypesKey},
+	Order:    []string{cloud.RegionsKey, cloud.AuthTypesKey},
+	Properties: map[string]*jsonschema.Schema{
+		cloud.RegionsKey: {
+			Type:     []jsonschema.Type{jsonschema.ObjectType},
+			Singular: "region",
+			Plural:   "regions",
+			AdditionalProperties: &jsonschema.Schema{
+				Type: []jsonschema.Type{jsonschema.ObjectType},
+				// Required:      []string{cloud.EndpointKey},
+				// MaxProperties: jsonschema.Int(1),
+				// Properties: map[string]*jsonschema.Schema{
+				//     cloud.EndpointKey: &jsonschema.Schema{
+				//         Singular:      "the API endpoint url for the region",
+				//         Type:          []jsonschema.Type{jsonschema.StringType},
+				//         Format:        jsonschema.FormatURI,
+				//         Default:       "",
+				//         PromptDefault: "use cloud api url",
+				//     },
+				// },
+			},
+		},
+		cloud.AuthTypesKey: {
+			// don't need a prompt, since there's only one choice.
+			Type: []jsonschema.Type{jsonschema.ArrayType},
+			Enum: []interface{}{[]string{string(cloud.HTTPSigAuthType)}},
+		},
+	},
+}
 
 var configSchema = environschema.Fields{
 	"compartment-id": {
@@ -146,9 +179,8 @@ func (e EnvironProvider) Version() int {
 }
 
 // CloudSchema implements environs.EnvironProvider.
-// OCI provider does not support custom schema.
 func (e EnvironProvider) CloudSchema() *jsonschema.Schema {
-	return nil
+	return cloudSchema
 }
 
 // Ping implements environs.EnvironProvider.
@@ -215,12 +247,13 @@ func (e *EnvironProvider) Open(params environs.OpenParams) (environs.Environ, er
 		clock: clock.WallClock,
 	}
 
-	env.Networking = netEnviron
-	env.Firewaller = firewaller
-
 	if err := env.SetConfig(params.Config); err != nil {
 		return nil, err
 	}
+
+	env.Networking = netEnviron
+	env.Firewaller = firewaller
+	env.namespace, err = instance.NewNamespace(env.Config().UUID())
 
 	cfg := env.ecfg()
 	if cfg.compartmentID() == nil {
@@ -323,7 +356,7 @@ func (e EnvironProvider) Validate(cfg, old *config.Config) (valid *config.Config
 		return nil, err
 	}
 	newAttrs, err := cfg.ValidateUnknownAttrs(
-		schema.Fields{}, schema.Defaults{},
+		configFields, configDefaults,
 	)
 	if err != nil {
 		return nil, err

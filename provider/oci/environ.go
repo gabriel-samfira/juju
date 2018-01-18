@@ -5,6 +5,7 @@ package oci
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -43,10 +44,11 @@ type Environ struct {
 	p   *EnvironProvider
 
 	clock clock.Clock
-	cfg   *config.Config
+	// cfg   *config.Config
 
 	ecfgMutex sync.Mutex
 	ecfgObj   *environConfig
+	namespace instance.Namespace
 
 	vcn     ociCore.Vcn
 	seclist ociCore.SecurityList
@@ -279,25 +281,26 @@ func (e *Environ) secListName(controllerUUID string) string {
 	return fmt.Sprintf("juju-seclist-%s", controllerUUID)
 }
 
-func (e *Environ) ensureVCN(controllerUUID string) (vcn ociCore.Vcn, err error) {
-	if vcn, err = e.getVcn(controllerUUID); err != nil {
+func (e *Environ) ensureVCN(controllerUUID string) (ociCore.Vcn, error) {
+	logger.Infof("ensuring that VCN is created")
+	if vcn, err := e.getVcn(controllerUUID); err != nil {
+		isNotFound := errors.IsNotFound(err)
+		logger.Infof("Got error %T --> %v --> %v", err, err, isNotFound)
 		if !errors.IsNotFound(err) {
-			return
+			return ociCore.Vcn{}, err
 		}
 	} else {
-		return
+		return vcn, nil
 	}
 
 	name := e.vcnName(controllerUUID)
-	if err != nil {
-		return
-	}
 	logger.Infof("creating new VCN %s", *name)
 	addressSpace := providerNetwork.DefaultAddressSpace
 	vcnDetails := ociCore.CreateVcnDetails{
 		CidrBlock:     &addressSpace,
 		CompartmentID: e.ecfg().compartmentID(),
 		DisplayName:   name,
+		// DnsLabel:      &providerNetwork.DnsLabel,
 		FreeFormTags: map[string]string{
 			tags.JujuController: controllerUUID,
 		},
@@ -308,17 +311,17 @@ func (e *Environ) ensureVCN(controllerUUID string) (vcn ociCore.Vcn, err error) 
 
 	result, err := e.cli.CreateVcn(context.Background(), request)
 	if err != nil {
-		return
+		return ociCore.Vcn{}, err
 	}
 	err = e.waitForResourceStatus(
 		e.getVCNStatus, result.Vcn.ID,
 		string(ociCore.VCN_LIFECYCLE_STATE_AVAILABLE),
 		5*time.Minute)
 	if err != nil {
-		return
+		return ociCore.Vcn{}, err
 	}
-	vcn = result.Vcn
-	return
+	vcn := result.Vcn
+	return vcn, nil
 }
 
 func (e *Environ) getSeclistStatus(resourceID *string) (string, error) {
@@ -468,8 +471,8 @@ func (e *Environ) getFreeSubnet(existing map[string]bool) (string, error) {
 	}
 
 	for i := 0; i <= 255; i++ {
-		to4[1] = byte(i)
-		subnet := fmt.Sprint("%s/%s", to4.String(), providerNetwork.SubnetPrefixLength)
+		to4[2] = byte(i)
+		subnet := fmt.Sprintf("%s/%s", to4.String(), providerNetwork.SubnetPrefixLength)
 		if _, ok := existing[subnet]; ok {
 			continue
 		}
@@ -496,8 +499,9 @@ func (e *Environ) getSubnetStatus(resourceID *string) (string, error) {
 }
 
 func (e *Environ) createSubnet(controllerUUID, ad, cidr string, vcnID *string, seclists []string) (ociCore.Subnet, error) {
-	displayName := fmt.Sprint("juju-%s-%s", ad, controllerUUID)
+	displayName := fmt.Sprintf("juju-%s-%s", ad, controllerUUID)
 	compartment := e.ecfg().compartmentID()
+	// TODO(gsamfira): maybe "local" would be better?
 	subnetDetails := ociCore.CreateSubnetDetails{
 		AvailabilityDomain: &ad,
 		CidrBlock:          &cidr,
@@ -505,6 +509,7 @@ func (e *Environ) createSubnet(controllerUUID, ad, cidr string, vcnID *string, s
 		VcnID:              vcnID,
 		DisplayName:        &displayName,
 		SecurityListIds:    seclists,
+		// DnsLabel:           &providerNetwork.DnsLabel,
 		FreeFormTags: map[string]string{
 			tags.JujuController: controllerUUID,
 		},
@@ -560,6 +565,7 @@ func (e *Environ) ensureSubnets(vcn ociCore.Vcn, secList ociCore.SecurityList, c
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
+			logger.Warningf("Creating subnet with details: %v --> %v --> %v --> %v --> %v", controllerUUID, ad, newIPNet, *vcn.ID, *secList.ID)
 			newSubnet, err := e.createSubnet(controllerUUID, ad, newIPNet, vcn.ID, []string{*secList.ID})
 			if err != nil {
 				return nil, errors.Trace(err)
@@ -640,15 +646,14 @@ func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
 				secLists[secListId] = true
 			}
 			if vcnID != nil {
-				if vcnID != subnet.VcnID {
+				if *vcnID != *subnet.VcnID {
 					return errors.Errorf(
 						"Found a subnet with a different vcnID. This should not happen. Vcn: %s, subnet: %s", *vcnID, *subnet.VcnID)
-				} else {
-					continue
 				}
 			}
 			vcnID = subnet.VcnID
 
+			logger.Infof("removing subnet with ID: %s", *subnet.ID)
 			request := ociCore.DeleteSubnetRequest{
 				SubnetID: subnet.ID,
 			}
@@ -672,7 +677,7 @@ func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
 		request := ociCore.DeleteSecurityListRequest{
 			SecurityListID: &secList,
 		}
-
+		logger.Infof("removing security list: %s", secList)
 		err := e.cli.DeleteSecurityList(context.Background(), request)
 		if err != nil {
 			return nil
@@ -690,14 +695,17 @@ func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
 		VcnID: vcnID,
 	}
 
-	err := e.cli.DeleteVcn(context.Background(), request)
+	if vcnID != nil {
+		logger.Infof("deleting VCN: %s", *vcnID)
+		err := e.cli.DeleteVcn(context.Background(), request)
 
-	err = e.waitForResourceStatus(
-		e.getVCNStatus, vcnID,
-		string(ociCore.VCN_LIFECYCLE_STATE_TERMINATED),
-		5*time.Minute)
-	if !errors.IsNotFound(err) {
-		return err
+		err = e.waitForResourceStatus(
+			e.getVCNStatus, vcnID,
+			string(ociCore.VCN_LIFECYCLE_STATE_TERMINATED),
+			5*time.Minute)
+		if !errors.IsNotFound(err) {
+			return err
+		}
 	}
 	return nil
 }
@@ -833,7 +841,13 @@ func (e *Environ) DestroyController(controllerUUID string) error {
 	for i, val := range instances {
 		ids[i] = val.Id()
 	}
-	return e.StopInstances(ids...)
+
+	err = e.StopInstances(ids...)
+	if err != nil {
+		return err
+	}
+
+	return e.cleanupNetworksAndSubnets(controllerUUID)
 }
 
 // Provider implements environs.Environ.
@@ -859,10 +873,18 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 		return nil, errors.NotFoundf("Controller UUID")
 	}
 
-	// networks, err := e.ensureNetworksAndSubnets(args.ControllerUUID)
-	// if err != nil {
-	// 	return nil, errors.Trace(err)
-	// }
+	networks, err := e.ensureNetworksAndSubnets(args.ControllerUUID)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	zones, err := e.AvailabilityZones()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	zone := zones[0].Name()
+	network := networks[zone][0]
 	// refresh the global image cache
 	// this only hits the API every 30 minutes, otherwise just retrieves
 	// from cache
@@ -870,7 +892,7 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-
+	logger.Warningf("Image cache contains: %v", imgCache)
 	// TODO(gsamfira): implement imageCache filter by series, and other attributes
 	// TODO(gsamfira): generate []ImageMetadata from filtered images
 	// TODO(gsamfira): get []InstanceType for filtered images
@@ -878,14 +900,15 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 	arches := args.Tools.Arches()
 
 	types := imgCache.supportedShapes(series)
-	// check if we find an image that is compliant with the
-	// constraints provided in the oracle cloud account
-	args.ImageMetadata = imgCache.imageMetadata(series)
 
+	defaultType := string(VirtualMachine)
 	if args.Constraints.VirtType == nil {
-		defaultType := string(VirtualMachine)
 		args.Constraints.VirtType = &defaultType
 	}
+
+	// check if we find an image that is compliant with the
+	// constraints provided in the oracle cloud account
+	args.ImageMetadata = imgCache.imageMetadata(series, *args.Constraints.VirtType)
 
 	spec, image, err := findInstanceSpec(
 		args.ImageMetadata,
@@ -896,6 +919,7 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 			Constraints: args.Constraints,
 		},
 	)
+	logger.Warningf("FindSpec: %v --> %v --> %v", spec, image, err)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -915,7 +939,10 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 	); err != nil {
 		return nil, errors.Trace(err)
 	}
-	hostname := args.InstanceConfig.MachineId
+	hostname, err := e.namespace.Hostname(args.InstanceConfig.MachineId)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 	tags := args.InstanceConfig.Tags
 
 	// var apiPort int
@@ -946,26 +973,32 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 		return nil, errors.Annotate(err, "cannot make user data")
 	}
 
+	logger.Debugf("userdata: %s", userData)
+
 	// NOTE(gsamfira): Should we make this configurable?
 	// TODO(gsamfira): select Availability Domain and subnet ID
 	assignPublicIp := true
 	instanceDetails := ociCore.LaunchInstanceDetails{
-		AvailabilityDomain: nil,
+		AvailabilityDomain: &zone,
 		CompartmentID:      e.ecfg().compartmentID(),
 		ImageID:            &image,
 		Shape:              &spec.InstanceType.Name,
 		CreateVnicDetails: &ociCore.CreateVnicDetails{
-			SubnetID:       nil,
+			SubnetID:       network.ID,
 			AssignPublicIp: &assignPublicIp,
 			DisplayName:    &hostname,
-			HostnameLabel:  &hostname,
+			// HostnameLabel:  &hostname,
 		},
 		DisplayName: &hostname,
 		Metadata: map[string]string{
-			"user_data": string(userData),
+			"user_data":           string(userData),
+			"ssh_authorized_keys": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC2oT7j/+elHY9U2ibgk2RYJgCvqIwewYKJTtHslTQFDWlHLeDam93BBOFlQJm9/wKX/qjC8d26qyzjeeeVf2EEAztp+jQfEq9OU+EtgQUi589jxtVmaWuYED8KVNbzLuP79SrBtEZD4xqgmnNotPhRshh3L6eYj4XzLWDUuOD6kzNdsJA2QOKeMOIFpBN6urKJHRHYD+oUPUX1w5QMv1W1Srlffl4m5uE+0eJYAMr02980PG4+jS4bzM170wYdWwUI0pSZsEDC8Fn7jef6QARU2CgHJYlaTem+KWSXislOUTaCpR0uhakP1ezebW20yuuc3bdRNgSlZi9B7zAPALGZpOshVqwF+KmLDi6XiFwG+NnwAFa6zaQfhOxhw/rF5Jk/wVjHIHkNNvYewycZPbKui0E3QrdVtR908N3VsPtLhMQ59BEMl3xlURSi0fiOU3UjnwmOkOoFDy/WT8qk//gFD93tUxlf4eKXDgNfME3zNz8nVi2uCPvG5NT/P/VWR8NMqW6tZcmWyswM/GgL6Y84JQ3ESZq/7WvAetdc1gVIDQJ2ejYbSHBcQpWvkocsiuMTCwiEvQ0sr+UE5jmecQvLPUyXOhuMhw43CwxnLk1ZSeYeCorxbskyqIXH71o8zhbPoPiEbwgB+i9WEoq02u7c8CmCmO8Y9aOnh8MzTKxIgQ== gsamfira@cloudbasesolutions.com",
 		},
 		FreeFormTags: tags,
 	}
+
+	aa, _ := json.MarshalIndent(instanceDetails, "", "    ")
+	logger.Warningf("Launching instance with details: %s", aa)
 	request := ociCore.LaunchInstanceRequest{
 		LaunchInstanceDetails: instanceDetails,
 	}
@@ -985,7 +1018,11 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 	if err := instance.waitForMachineStatus(desiredStatus, timeout); err != nil {
 		return nil, errors.Trace(err)
 	}
-	logger.Infof("started instance %q", machineId)
+	logger.Infof("started instance %q", *machineId)
+
+	if err := instance.waitForPublicIP(); err != nil {
+		return nil, errors.Trace(err)
+	}
 
 	result := &environs.StartInstanceResult{
 		Instance: instance,
@@ -1020,9 +1057,18 @@ func (o *Environ) terminateInstances(instances ...*ociInstance) error {
 	for _, oInst := range instances {
 		go func(inst *ociInstance) {
 			defer wg.Done()
+			logger.Warningf("Terminating: %s", inst.Id())
 			if err := inst.deleteInstance(); err != nil {
 				instIds = append(instIds, inst.Id())
 				errs = append(errs, err)
+			} else {
+				err := inst.waitForMachineStatus(
+					ociCore.INSTANCE_LIFECYCLE_STATE_TERMINATED,
+					5*time.Minute)
+				if err != nil {
+					instIds = append(instIds, inst.Id())
+					errs = append(errs, err)
+				}
 			}
 		}(oInst)
 	}
@@ -1066,7 +1112,10 @@ func (e *Environ) MaintainInstance(args environs.StartInstanceParams) error {
 func (e *Environ) Config() *config.Config {
 	e.ecfgMutex.Lock()
 	defer e.ecfgMutex.Unlock()
-	return e.cfg
+	if e.ecfgObj == nil {
+		return nil
+	}
+	return e.ecfgObj.Config
 }
 
 // PrecheckInstance implements environs.InstancePrechecker.

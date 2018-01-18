@@ -19,7 +19,6 @@ type OCIRenderer struct{}
 // Renderer is defined in the renderers.ProviderRenderer interface
 func (OCIRenderer) Render(cfg cloudinit.CloudConfig, os jujuos.OSType) ([]byte, error) {
 	var renderedUdata []byte
-	var b64udata []byte
 	var err error
 	switch os {
 	case jujuos.Ubuntu:
@@ -31,6 +30,6 @@ func (OCIRenderer) Render(cfg cloudinit.CloudConfig, os jujuos.OSType) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	b64.StdEncoding.Encode(b64udata, renderedUdata)
-	return b64udata, nil
+	ret := b64.StdEncoding.EncodeToString(renderedUdata)
+	return []byte(ret), nil
 }
