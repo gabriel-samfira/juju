@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rsa"
 	"fmt"
-	"io/ioutil"
 
 	"github.com/juju/errors"
 
@@ -14,7 +13,7 @@ import (
 )
 
 type jujuConfigProvider struct {
-	keyFile        string
+	key            []byte
 	keyFingerprint string
 	passphrase     string
 	tenancyOCID    string
@@ -34,9 +33,9 @@ type ociClient struct {
 }
 
 // NewJujuConfigProvider returns a new ociCommon.ConfigurationProvider instance
-func NewJujuConfigProvider(user, tenant, keyFile, fingerprint, passphrase, region string) ociCommon.ConfigurationProvider {
+func NewJujuConfigProvider(user, tenant string, key []byte, fingerprint, passphrase, region string) ociCommon.ConfigurationProvider {
 	return &jujuConfigProvider{
-		keyFile:        keyFile,
+		key:            key,
 		keyFingerprint: fingerprint,
 		passphrase:     passphrase,
 		tenancyOCID:    tenant,
@@ -115,16 +114,12 @@ func (j jujuConfigProvider) Region() (string, error) {
 }
 
 func (j jujuConfigProvider) PrivateRSAKey() (*rsa.PrivateKey, error) {
-	if j.keyFile == "" {
-		return nil, errors.Errorf("private key file is not set")
-	}
-	pemFileContent, err := ioutil.ReadFile(j.keyFile)
-	if err != nil {
-		return nil, errors.Trace(err)
+	if j.key == nil {
+		return nil, errors.Errorf("private key is not set")
 	}
 
 	key, err := ociCommon.PrivateKeyFromBytes(
-		pemFileContent, &j.passphrase)
+		j.key, &j.passphrase)
 	return key, err
 }
 

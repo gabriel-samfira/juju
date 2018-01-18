@@ -150,13 +150,13 @@ var credentialSchema = map[cloud.AuthType]cloud.CredentialSchema{
 			},
 		},
 		{
-			"key-file", cloud.CredentialAttr{
-				Description: "Path to private key",
+			"key", cloud.CredentialAttr{
+				Description: "PEM encoded private key",
 			},
 		},
 		{
 			"pass-phrase", cloud.CredentialAttr{
-				Description: "Passphrase used to unlock key-file",
+				Description: "Passphrase used to unlock the key",
 				Hidden:      true,
 			},
 		},
@@ -223,7 +223,7 @@ func (e *EnvironProvider) Open(params environs.OpenParams) (environs.Environ, er
 
 	provider := providerCommon.NewJujuConfigProvider(
 		creds["user"], creds["tenancy"],
-		creds["key-file"], creds["fingerprint"],
+		[]byte(creds["key"]), creds["fingerprint"],
 		creds["pass-phrase"], creds["region"])
 
 	client, err := providerCommon.NewOciClient(provider)
@@ -268,15 +268,10 @@ func (e EnvironProvider) CredentialSchemas() map[cloud.AuthType]cloud.Credential
 	return credentialSchema
 }
 
-func validateKey(key, passphrase string) error {
-	data, err := ioutil.ReadFile(key)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	keyBlock, _ := pem.Decode(data)
+func validateKey(key []byte, passphrase string) error {
+	keyBlock, _ := pem.Decode(key)
 	if keyBlock == nil {
-		return errors.Errorf("invalid private key %s", key)
+		return errors.Errorf("invalid private key")
 	}
 
 	if x509.IsEncryptedPEMBlock(keyBlock) {
@@ -317,7 +312,11 @@ func (e EnvironProvider) DetectCredentials() (*cloud.CloudCredential, error) {
 			values.KeyFile == "" || values.Fingerprint == "" || values.Region == "" {
 			return nil, errors.Errorf("missing required fields in config section %s", val)
 		}
-		if err := validateKey(values.KeyFile, values.PassPhrase); err != nil {
+		pemFileContent, err := ioutil.ReadFile(values.KeyFile)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		if err := validateKey(pemFileContent, values.PassPhrase); err != nil {
 			return nil, errors.Trace(err)
 		}
 
@@ -329,7 +328,7 @@ func (e EnvironProvider) DetectCredentials() (*cloud.CloudCredential, error) {
 			map[string]string{
 				"user":        values.User,
 				"tenancy":     values.Tenancy,
-				"key-file":    values.KeyFile,
+				"key":         string(pemFileContent),
 				"pass-phrase": values.PassPhrase,
 				"fingerprint": values.Fingerprint,
 				"region":      values.Region,

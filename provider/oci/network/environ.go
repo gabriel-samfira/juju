@@ -27,7 +27,7 @@ const (
 )
 
 // TODO(gsamfira): Use "local" instead? make configurable?
-var DnsLabel = "juju"
+var DnsLabelTld = "local"
 
 // Environ implements the environs.Networking interface
 type Environ struct {

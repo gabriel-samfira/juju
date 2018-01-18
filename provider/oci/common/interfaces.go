@@ -40,4 +40,14 @@ type ApiClient interface {
 	ListSubnets(ctx context.Context, request ociCore.ListSubnetsRequest) (response ociCore.ListSubnetsResponse, err error)
 	DeleteSubnet(ctx context.Context, request ociCore.DeleteSubnetRequest) (err error)
 	GetSubnet(ctx context.Context, request ociCore.GetSubnetRequest) (response ociCore.GetSubnetResponse, err error)
+
+	CreateInternetGateway(ctx context.Context, request ociCore.CreateInternetGatewayRequest) (response ociCore.CreateInternetGatewayResponse, err error)
+	GetInternetGateway(ctx context.Context, request ociCore.GetInternetGatewayRequest) (response ociCore.GetInternetGatewayResponse, err error)
+	ListInternetGateways(ctx context.Context, request ociCore.ListInternetGatewaysRequest) (response ociCore.ListInternetGatewaysResponse, err error)
+	DeleteInternetGateway(ctx context.Context, request ociCore.DeleteInternetGatewayRequest) (err error)
+
+	CreateRouteTable(ctx context.Context, request ociCore.CreateRouteTableRequest) (response ociCore.CreateRouteTableResponse, err error)
+	GetRouteTable(ctx context.Context, request ociCore.GetRouteTableRequest) (response ociCore.GetRouteTableResponse, err error)
+	DeleteRouteTable(ctx context.Context, request ociCore.DeleteRouteTableRequest) (err error)
+	ListRouteTables(ctx context.Context, request ociCore.ListRouteTablesRequest) (response ociCore.ListRouteTablesResponse, err error)
 }
