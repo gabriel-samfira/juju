@@ -374,8 +374,8 @@ func (e *Environ) StorageProviderTypes() ([]storage.ProviderType, error) {
 }
 
 // StorageProvider implements storage.ProviderRegistry.
-func (e *Environ) StorageProvider(storage.ProviderType) (storage.Provider, error) {
-	return nil, nil
+func (e *Environ) StorageProvider(t storage.ProviderType) (storage.Provider, error) {
+	return nil, errors.NotFoundf("storage provider %q", t)
 }
 
 // StartInstance implements environs.InstanceBroker.
@@ -467,7 +467,7 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 	} else {
 		// All ports are the same so pick the first.
 		// apiPort = args.InstanceConfig.APIInfo.Ports()[0]
-		desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_STARTING
+		desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_PROVISIONING
 	}
 
 	cloudcfg, err := cloudinit.New(series)

@@ -21,9 +21,11 @@ const (
 
 	SubnetPrefixLength = "24"
 
-	VcnNamePrefix     = "juju-vcn"
-	SecListNamePrefix = "juju-seclist"
-	SubnetNamePrefix  = "juju-subnet"
+	VcnNamePrefix         = "juju-vcn"
+	SecListNamePrefix     = "juju-seclist"
+	SubnetNamePrefix      = "juju-subnet"
+	InternetGatewayPrefix = "juju-ig"
+	RouteTablePrefix      = "juju-rt"
 )
 
 // TODO(gsamfira): Use "local" instead? make configurable?
