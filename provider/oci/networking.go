@@ -449,7 +449,14 @@ func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
 	}
 
 	secLists := map[string]bool{}
-	var vcnID *string
+	vcn, err := e.getVcn(controllerUUID)
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			return errors.Trace(err)
+		}
+	}
+
+	vcnID := vcn.ID
 	for _, adSubnets := range e.subnets {
 		for _, subnet := range adSubnets {
 			for _, secListId := range subnet.SecurityListIds {
@@ -607,10 +614,10 @@ func (e *Environ) ensureInternetGateway(controllerUUID string, vcnID *string) (o
 func (e *Environ) deleteInternetGateway(vcnID *string) error {
 	ig, err := e.getInternetGateway(vcnID)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			return nil
+		if !errors.IsNotFound(err) {
+			return errors.Trace(err)
 		}
-		return errors.Trace(err)
+		return nil
 	}
 	terminatingStatus := ociCore.INTERNET_GATEWAY_LIFECYCLE_STATE_TERMINATING
 	terminatedStatus := ociCore.INTERNET_GATEWAY_LIFECYCLE_STATE_TERMINATED
@@ -635,7 +642,9 @@ func (e *Environ) deleteInternetGateway(vcnID *string) error {
 		string(terminatedStatus),
 		5*time.Minute); err != nil {
 
-		return errors.Trace(err)
+		if !errors.IsNotFound(err) {
+			return errors.Trace(err)
+		}
 	}
 
 	return nil
@@ -729,6 +738,7 @@ func (e *Environ) deleteRouteTable(controllerUUID string, vcnID *string) error {
 		if !errors.IsNotFound(err) {
 			return err
 		}
+		return nil
 	}
 
 	if rt.LifecycleState == ociCore.ROUTE_TABLE_LIFECYCLE_STATE_TERMINATED {
@@ -752,7 +762,9 @@ func (e *Environ) deleteRouteTable(controllerUUID string, vcnID *string) error {
 		string(ociCore.ROUTE_TABLE_LIFECYCLE_STATE_TERMINATED),
 		5*time.Minute); err != nil {
 
-		return errors.Trace(err)
+		if !errors.IsNotFound(err) {
+			return errors.Trace(err)
+		}
 	}
 	return nil
 }
