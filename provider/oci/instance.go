@@ -126,11 +126,21 @@ func (o *ociInstance) Addresses() ([]network.Address, error) {
 
 	for _, val := range vnics {
 		if val.Vnic.PrivateIp != nil {
-			privateAddress := network.NewScopedAddress(*val.Vnic.PrivateIp, network.ScopeCloudLocal)
+			privateAddress := network.Address{
+				Value: *val.Vnic.PrivateIp,
+				Type:  network.IPv4Address,
+				Scope: network.ScopeCloudLocal,
+			}
+			// privateAddress := network.NewScopedAddress(*val.Vnic.PrivateIp, network.ScopeCloudLocal)
 			addresses = append(addresses, privateAddress)
 		}
 		if val.Vnic.PublicIp != nil {
-			publicAddress := network.NewScopedAddress(*val.Vnic.PublicIp, network.ScopePublic)
+			publicAddress := network.Address{
+				Value: *val.Vnic.PublicIp,
+				Type:  network.IPv4Address,
+				Scope: network.ScopePublic,
+			}
+			// publicAddress := network.NewScopedAddress(*val.Vnic.PublicIp, network.ScopePublic)
 			addresses = append(addresses, publicAddress)
 		}
 	}
