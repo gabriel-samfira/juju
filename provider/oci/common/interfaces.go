@@ -3,6 +3,9 @@ package common
 import (
 	"context"
 
+	"github.com/juju/juju/instance"
+	"github.com/juju/juju/network"
+
 	ociCommon "github.com/oracle/oci-go-sdk/common"
 	ociCore "github.com/oracle/oci-go-sdk/core"
 	ociIdentity "github.com/oracle/oci-go-sdk/identity"
@@ -12,6 +15,9 @@ type ApiClient interface {
 	ociCommon.ConfigurationProvider
 
 	Ping() error
+	GetInstanceVnicAttachments(instanceID instance.Id, compartmentID *string) (ociCore.ListVnicAttachmentsResponse, error)
+	GetInstanceVnics(vnics []ociCore.VnicAttachment) ([]ociCore.GetVnicResponse, error)
+	GetInstanceAddresses(instanceID instance.Id, compartmentID *string) ([]network.Address, error)
 
 	ListShapes(ctx context.Context, request ociCore.ListShapesRequest) (response ociCore.ListShapesResponse, err error)
 	ListImages(ctx context.Context, request ociCore.ListImagesRequest) (response ociCore.ListImagesResponse, err error)

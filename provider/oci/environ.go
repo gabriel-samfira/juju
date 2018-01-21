@@ -34,8 +34,8 @@ import (
 )
 
 type Environ struct {
-	environs.Networking
-	environs.Firewaller
+	// environs.Networking
+	// environs.Firewaller
 
 	cli providerCommon.ApiClient
 	p   *EnvironProvider
@@ -67,6 +67,7 @@ var _ storage.ProviderRegistry = (*Environ)(nil)
 var _ environs.Environ = (*Environ)(nil)
 var _ environs.Firewaller = (*Environ)(nil)
 var _ environs.Networking = (*Environ)(nil)
+var _ environs.NetworkingEnviron = (*Environ)(nil)
 
 // AvailabilityZones is defined in the common.ZonedEnviron interface
 func (e *Environ) AvailabilityZones() ([]common.AvailabilityZone, error) {

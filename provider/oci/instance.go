@@ -80,75 +80,16 @@ func (o *ociInstance) Status() instance.InstanceStatus {
 	}
 }
 
-func (o *ociInstance) getInstanceVnicAttachments() (ociCore.ListVnicAttachmentsResponse, error) {
-	request := ociCore.ListVnicAttachmentsRequest{
-		CompartmentID: o.raw.CompartmentID,
-		InstanceID:    o.raw.ID,
-	}
-	ctx := context.Background()
-	response, err := o.env.cli.ListVnicAttachments(ctx, request)
-	if err != nil {
-		return ociCore.ListVnicAttachmentsResponse{}, errors.Trace(err)
-	}
-	return response, nil
-}
-
-func (o *ociInstance) getInstanceVnics(vnics []ociCore.VnicAttachment) ([]ociCore.GetVnicResponse, error) {
-	result := []ociCore.GetVnicResponse{}
-
-	for _, val := range vnics {
-		vnicID := val.VnicID
-		request := ociCore.GetVnicRequest{
-			VnicID: vnicID,
-		}
-		response, err := o.env.cli.GetVnic(context.Background(), request)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		result = append(result, response)
-	}
-	return result, nil
-}
-
 // Addresses implements instance.Instance
 func (o *ociInstance) Addresses() ([]network.Address, error) {
-	attachments, err := o.getInstanceVnicAttachments()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	vnics, err := o.getInstanceVnics(attachments.Items)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	addresses := []network.Address{}
-
-	for _, val := range vnics {
-		if val.Vnic.PrivateIp != nil {
-			privateAddress := network.Address{
-				Value: *val.Vnic.PrivateIp,
-				Type:  network.IPv4Address,
-				Scope: network.ScopeCloudLocal,
-			}
-			// privateAddress := network.NewScopedAddress(*val.Vnic.PrivateIp, network.ScopeCloudLocal)
-			addresses = append(addresses, privateAddress)
-		}
-		if val.Vnic.PublicIp != nil {
-			publicAddress := network.Address{
-				Value: *val.Vnic.PublicIp,
-				Type:  network.IPv4Address,
-				Scope: network.ScopePublic,
-			}
-			// publicAddress := network.NewScopedAddress(*val.Vnic.PublicIp, network.ScopePublic)
-			addresses = append(addresses, publicAddress)
-		}
-	}
-	return addresses, nil
+	addresses, err := o.env.cli.GetInstanceAddresses(o.Id(), o.raw.CompartmentID)
+	return addresses, err
 }
 
 func (o *ociInstance) isTerminating() bool {
-	if o.raw.LifecycleState == ociCore.INSTANCE_LIFECYCLE_STATE_TERMINATED || o.raw.LifecycleState == ociCore.INSTANCE_LIFECYCLE_STATE_TERMINATING {
+	terminatedStatus := ociCore.INSTANCE_LIFECYCLE_STATE_TERMINATED
+	terminatingStatus := ociCore.INSTANCE_LIFECYCLE_STATE_TERMINATING
+	if o.raw.LifecycleState == terminatedStatus || o.raw.LifecycleState == terminatingStatus {
 		return true
 	}
 	return false

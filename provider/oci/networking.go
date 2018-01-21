@@ -7,17 +7,40 @@ import (
 	"time"
 
 	"github.com/juju/errors"
+	"gopkg.in/juju/names.v2"
 
+	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/tags"
+	"github.com/juju/juju/instance"
+	"github.com/juju/juju/network"
+
 	// providerCommon "github.com/juju/juju/provider/oci/common"
-	providerNetwork "github.com/juju/juju/provider/oci/network"
+	// providerNetwork "github.com/juju/juju/provider/oci/network"
 
 	ociCore "github.com/oracle/oci-go-sdk/core"
 	// ociIdentity "github.com/oracle/oci-go-sdk/identity"
 )
 
+const (
+	// DefaultAddressSpace is the subnet to use for the default juju VCN
+	// An individual subnet will be created from this class, for each
+	// availability domain.
+	DefaultAddressSpace = "10.0.0.0/16"
+
+	SubnetPrefixLength = "24"
+
+	VcnNamePrefix         = "juju-vcn"
+	SecListNamePrefix     = "juju-seclist"
+	SubnetNamePrefix      = "juju-subnet"
+	InternetGatewayPrefix = "juju-ig"
+	RouteTablePrefix      = "juju-rt"
+)
+
+// TODO(gsamfira): Use "local" instead? make configurable?
+var DnsLabelTld = "local"
+
 func (e *Environ) vcnName(controllerUUID string) *string {
-	name := fmt.Sprintf("%s-%s", providerNetwork.VcnNamePrefix, controllerUUID)
+	name := fmt.Sprintf("%s-%s", VcnNamePrefix, controllerUUID)
 	return &name
 }
 
@@ -83,12 +106,12 @@ func (e *Environ) ensureVCN(controllerUUID string) (ociCore.Vcn, error) {
 
 	name := e.vcnName(controllerUUID)
 	logger.Infof("creating new VCN %s", *name)
-	addressSpace := providerNetwork.DefaultAddressSpace
+	addressSpace := DefaultAddressSpace
 	vcnDetails := ociCore.CreateVcnDetails{
 		CidrBlock:     &addressSpace,
 		CompartmentID: e.ecfg().compartmentID(),
 		DisplayName:   name,
-		DnsLabel:      &providerNetwork.DnsLabelTld,
+		DnsLabel:      &DnsLabelTld,
 		FreeFormTags: map[string]string{
 			tags.JujuController: controllerUUID,
 		},
@@ -234,7 +257,7 @@ func (e *Environ) allSubnets(controllerUUID string, vcnID *string) (map[string][
 }
 
 func (e *Environ) validateCidrBlock(cidr string) (bool, error) {
-	_, vncIPNet, err := net.ParseCIDR(providerNetwork.DefaultAddressSpace)
+	_, vncIPNet, err := net.ParseCIDR(DefaultAddressSpace)
 	if err != nil {
 		return false, errors.Trace(err)
 	}
@@ -250,18 +273,18 @@ func (e *Environ) validateCidrBlock(cidr string) (bool, error) {
 }
 
 func (e *Environ) getFreeSubnet(existing map[string]bool) (string, error) {
-	ip, _, err := net.ParseCIDR(providerNetwork.DefaultAddressSpace)
+	ip, _, err := net.ParseCIDR(DefaultAddressSpace)
 	if err != nil {
 		return "", errors.Trace(err)
 	}
 	to4 := ip.To4()
 	if to4 == nil {
-		return "", errors.Errorf("invalid IPv4 address: %s", providerNetwork.DefaultAddressSpace)
+		return "", errors.Errorf("invalid IPv4 address: %s", DefaultAddressSpace)
 	}
 
 	for i := 0; i <= 255; i++ {
 		to4[2] = byte(i)
-		subnet := fmt.Sprintf("%s/%s", to4.String(), providerNetwork.SubnetPrefixLength)
+		subnet := fmt.Sprintf("%s/%s", to4.String(), SubnetPrefixLength)
 		if _, ok := existing[subnet]; ok {
 			continue
 		}
@@ -569,7 +592,7 @@ func (e *Environ) getInternetGateway(vcnID *string) (ociCore.InternetGateway, er
 }
 
 func (e *Environ) internetGatewayName(controllerUUID string) *string {
-	name := fmt.Sprintf("%s-%s", providerNetwork.InternetGatewayPrefix, controllerUUID)
+	name := fmt.Sprintf("%s-%s", InternetGatewayPrefix, controllerUUID)
 	return &name
 }
 
@@ -672,7 +695,7 @@ func (e *Environ) getRouteTable(controllerUUID string, vcnID *string) (ociCore.R
 }
 
 func (e *Environ) routeTableName(controllerUUID string) *string {
-	name := fmt.Sprintf("%s-%s", providerNetwork.RouteTablePrefix, controllerUUID)
+	name := fmt.Sprintf("%s-%s", RouteTablePrefix, controllerUUID)
 	return &name
 }
 
@@ -767,4 +790,68 @@ func (e *Environ) deleteRouteTable(controllerUUID string, vcnID *string) error {
 		}
 	}
 	return nil
+}
+
+// Subnets is defined on the environs.Networking interface.
+func (e *Environ) Subnets(id instance.Id, subnets []network.Id) ([]network.SubnetInfo, error) {
+	return nil, nil
+}
+
+func (e *Environ) SuperSubnets() ([]string, error) {
+	return nil, errors.NotSupportedf("super subnets")
+}
+
+func (e *Environ) NetworkInterfaces(instId instance.Id) ([]network.InterfaceInfo, error) {
+	// attachments, err := e.cli.GetInstanceVnicAttachments(instId, e.ecfg().compartmentID())
+	// if err != nil {
+	// 	return nil, errors.Trace(err)
+	// }
+
+	// vnics, err := e.cli.GetInstanceVnics(attachments.Items)
+	// if err != nil {
+	// 	return nil, errors.Trace(err)
+	// }
+
+	// interfaces := []network.InterfaceInfo{}
+	return nil, nil
+}
+
+func (e *Environ) SupportsSpaces() (bool, error) {
+	return false, errors.NotSupportedf("spaces")
+}
+
+func (e *Environ) SupportsSpaceDiscovery() (bool, error) {
+	return false, errors.NotSupportedf("space discovery")
+}
+
+func (e *Environ) Spaces() ([]network.SpaceInfo, error) {
+	return nil, nil
+}
+
+func (e *Environ) ProviderSpaceInfo(space *network.SpaceInfo) (*environs.ProviderSpaceInfo, error) {
+	return nil, nil
+}
+
+func (e *Environ) AreSpacesRoutable(space1, space2 *environs.ProviderSpaceInfo) (bool, error) {
+	return false, nil
+}
+
+func (e *Environ) SupportsContainerAddresses() (bool, error) {
+	return false, errors.NotSupportedf("container addresses")
+}
+
+func (e *Environ) AllocateContainerAddresses(
+	hostInstanceID instance.Id,
+	containerTag names.MachineTag,
+	preparedInfo []network.InterfaceInfo) ([]network.InterfaceInfo, error) {
+
+	return nil, nil
+}
+
+func (e *Environ) ReleaseContainerAddresses(interfaces []network.ProviderInterfaceInfo) error {
+	return nil
+}
+
+func (e *Environ) SSHAddresses(addresses []network.Address) ([]network.Address, error) {
+	return addresses, nil
 }

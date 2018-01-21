@@ -23,7 +23,7 @@ import (
 	"github.com/juju/juju/environs/config"
 	"github.com/juju/juju/instance"
 	providerCommon "github.com/juju/juju/provider/oci/common"
-	providerNet "github.com/juju/juju/provider/oci/network"
+	// providerNet "github.com/juju/juju/provider/oci/network"
 	// ociNet "github.com/juju/juju/provider/oci/network"
 
 	"gopkg.in/ini.v1"
@@ -231,15 +231,10 @@ func (e *EnvironProvider) Open(params environs.OpenParams) (environs.Environ, er
 		return nil, errors.Trace(err)
 	}
 
-	netEnviron, err := providerNet.NewNetworkEnviron(client)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	firewaller, err := providerNet.NewFirewaller(client)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
+	// firewaller, err := providerNet.NewFirewaller(client)
+	// if err != nil {
+	// 	return nil, errors.Trace(err)
+	// }
 
 	env := &Environ{
 		cli:   client,
@@ -247,12 +242,17 @@ func (e *EnvironProvider) Open(params environs.OpenParams) (environs.Environ, er
 		clock: clock.WallClock,
 	}
 
+	// netEnviron, err := providerNet.NewNetworkEnviron(client, env)
+	// if err != nil {
+	// 	return nil, errors.Trace(err)
+	// }
+
 	if err := env.SetConfig(params.Config); err != nil {
 		return nil, err
 	}
 
-	env.Networking = netEnviron
-	env.Firewaller = firewaller
+	// env.Networking = netEnviron
+	// env.Firewaller = firewaller
 	env.namespace, err = instance.NewNamespace(env.Config().UUID())
 
 	cfg := env.ecfg()

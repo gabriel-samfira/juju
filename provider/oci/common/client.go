@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"github.com/juju/errors"
+	"github.com/juju/juju/instance"
+	"github.com/juju/juju/network"
 
 	ociCommon "github.com/oracle/oci-go-sdk/common"
 	ociCore "github.com/oracle/oci-go-sdk/core"
@@ -22,8 +24,6 @@ type jujuConfigProvider struct {
 }
 
 type ociClient struct {
-	// TODO(gsamfira): See which functions we use from the bellow clients
-	// and create interfaces, to be better able to mock them during testing
 	ociCore.ComputeClient
 	ociCore.BlockstorageClient
 	ociCore.VirtualNetworkClient
@@ -86,6 +86,70 @@ func (o *ociClient) Ping() error {
 	ctx := context.Background()
 	_, err = o.ListCompartments(ctx, request)
 	return err
+}
+
+func (o *ociClient) GetInstanceVnicAttachments(instanceID instance.Id, compartmentID *string) (ociCore.ListVnicAttachmentsResponse, error) {
+	instID := string(instanceID)
+	request := ociCore.ListVnicAttachmentsRequest{
+		CompartmentID: compartmentID,
+		InstanceID:    &instID,
+	}
+	response, err := o.ListVnicAttachments(context.Background(), request)
+	if err != nil {
+		return ociCore.ListVnicAttachmentsResponse{}, errors.Trace(err)
+	}
+	return response, nil
+}
+
+func (o *ociClient) GetInstanceVnics(vnics []ociCore.VnicAttachment) ([]ociCore.GetVnicResponse, error) {
+	result := []ociCore.GetVnicResponse{}
+
+	for _, val := range vnics {
+		vnicID := val.VnicID
+		request := ociCore.GetVnicRequest{
+			VnicID: vnicID,
+		}
+		response, err := o.GetVnic(context.Background(), request)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		result = append(result, response)
+	}
+	return result, nil
+}
+
+func (o *ociClient) GetInstanceAddresses(instanceID instance.Id, compartmentID *string) ([]network.Address, error) {
+	attachments, err := o.GetInstanceVnicAttachments(instanceID, compartmentID)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	vnics, err := o.GetInstanceVnics(attachments.Items)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	addresses := []network.Address{}
+
+	for _, val := range vnics {
+		if val.Vnic.PrivateIp != nil {
+			privateAddress := network.Address{
+				Value: *val.Vnic.PrivateIp,
+				Type:  network.IPv4Address,
+				Scope: network.ScopeCloudLocal,
+			}
+			addresses = append(addresses, privateAddress)
+		}
+		if val.Vnic.PublicIp != nil {
+			publicAddress := network.Address{
+				Value: *val.Vnic.PublicIp,
+				Type:  network.IPv4Address,
+				Scope: network.ScopePublic,
+			}
+			addresses = append(addresses, publicAddress)
+		}
+	}
+	return addresses, nil
 }
 
 func (j jujuConfigProvider) TenancyOCID() (string, error) {
