@@ -371,11 +371,18 @@ func (e *Environ) Provider() environs.EnvironProvider {
 
 // StorageProviderTypes implements storage.ProviderRegistry.
 func (e *Environ) StorageProviderTypes() ([]storage.ProviderType, error) {
-	return nil, nil
+	return []storage.ProviderType{ociStorageProviderType}, nil
 }
 
 // StorageProvider implements storage.ProviderRegistry.
 func (e *Environ) StorageProvider(t storage.ProviderType) (storage.Provider, error) {
+	if t == ociStorageProviderType {
+		return &storageProvider{
+			env: e,
+			api: e.cli,
+		}, nil
+	}
+
 	return nil, errors.NotFoundf("storage provider %q", t)
 }
 

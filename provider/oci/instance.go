@@ -59,6 +59,10 @@ func newInstance(raw ociCore.Instance, env *Environ) (*ociInstance, error) {
 	return instance, nil
 }
 
+func (o *ociInstance) availabilityZone() string {
+	return o.raw.AvailabilityDomain
+}
+
 // Id implements instance.Instance
 func (o *ociInstance) Id() instance.Id {
 	if o.raw.ID == nil {

@@ -56,4 +56,9 @@ type ApiClient interface {
 	GetRouteTable(ctx context.Context, request ociCore.GetRouteTableRequest) (response ociCore.GetRouteTableResponse, err error)
 	DeleteRouteTable(ctx context.Context, request ociCore.DeleteRouteTableRequest) (err error)
 	ListRouteTables(ctx context.Context, request ociCore.ListRouteTablesRequest) (response ociCore.ListRouteTablesResponse, err error)
+
+	CreateVolume(ctx context.Context, request ociCore.CreateVolumeRequest) (response ociCore.CreateVolumeResponse, err error)
+	ListVolumes(ctx context.Context, request ociCore.ListVolumesRequest) (response ociCore.ListVolumesResponse, err error)
+	GetVolume(ctx context.Context, request ociCore.GetVolumeRequest) (response ociCore.GetVolumeResponse, err error)
+	DeleteVolume(ctx context.Context, request ociCore.DeleteVolumeRequest) (err error)
 }

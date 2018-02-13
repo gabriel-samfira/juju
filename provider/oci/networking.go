@@ -507,7 +507,7 @@ func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
 				e.getSubnetStatus, subnet.ID,
 				string(ociCore.SUBNET_LIFECYCLE_STATE_TERMINATED),
 				5*time.Minute)
-			if !errors.IsNotFound(err) {
+			if err != nil && !errors.IsNotFound(err) {
 				return err
 			}
 		}
