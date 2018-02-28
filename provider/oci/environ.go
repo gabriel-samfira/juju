@@ -145,6 +145,18 @@ func (e *Environ) getOciInstances(ids ...instance.Id) ([]*ociInstance, error) {
 	return ret, nil
 }
 
+func (e *Environ) getOciInstancesAsMap(ids ...instance.Id) (map[instance.Id]*ociInstance, error) {
+	instances, err := e.getOciInstances(ids...)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	ret := map[instance.Id]*ociInstance{}
+	for _, inst := range instances {
+		ret[inst.Id()] = inst
+	}
+	return ret, nil
+}
+
 // Instances implements environs.Environ.
 func (e *Environ) Instances(ids []instance.Id) ([]instance.Instance, error) {
 	if len(ids) == 0 {
@@ -229,7 +241,6 @@ func (e *Environ) Create(params environs.CreateParams) error {
 	if err := e.cli.Ping(); err != nil {
 		return errors.Trace(err)
 	}
-	// err := e.ensureNetworksAndSubnets(params.ControllerUUID)
 	return nil
 }
 

@@ -61,4 +61,10 @@ type ApiClient interface {
 	ListVolumes(ctx context.Context, request ociCore.ListVolumesRequest) (response ociCore.ListVolumesResponse, err error)
 	GetVolume(ctx context.Context, request ociCore.GetVolumeRequest) (response ociCore.GetVolumeResponse, err error)
 	DeleteVolume(ctx context.Context, request ociCore.DeleteVolumeRequest) (err error)
+	UpdateVolume(ctx context.Context, request ociCore.UpdateVolumeRequest) (response ociCore.UpdateVolumeResponse, err error)
+
+	ListVolumeAttachments(ctx context.Context, request ociCore.ListVolumeAttachmentsRequest) (response ociCore.ListVolumeAttachmentsResponse, err error)
+	GetVolumeAttachment(ctx context.Context, request ociCore.GetVolumeAttachmentRequest) (response ociCore.GetVolumeAttachmentResponse, err error)
+	DetachVolume(ctx context.Context, request ociCore.DetachVolumeRequest) (err error)
+	AttachVolume(ctx context.Context, request ociCore.AttachVolumeRequest) (response ociCore.AttachVolumeResponse, err error)
 }

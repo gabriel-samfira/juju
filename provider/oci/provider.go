@@ -217,10 +217,8 @@ func (e *EnvironProvider) Open(params environs.OpenParams) (environs.Environ, er
 	if err := validateCloudSpec(params.Cloud); err != nil {
 		return nil, errors.Trace(err)
 	}
-	// TODO(gsamfira): error out if compartment-id is empty
 
 	creds := params.Cloud.Credential.Attributes()
-
 	provider := providerCommon.NewJujuConfigProvider(
 		creds["user"], creds["tenancy"],
 		[]byte(creds["key"]), creds["fingerprint"],
