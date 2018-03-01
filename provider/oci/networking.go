@@ -378,7 +378,6 @@ func (e *Environ) ensureSubnets(vcn ociCore.Vcn, secList ociCore.SecurityList, c
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
-			logger.Warningf("Creating subnet with details: %v --> %v --> %v --> %v --> %v", controllerUUID, ad, newIPNet, *vcn.ID, *secList.ID)
 			newSubnet, err := e.createSubnet(controllerUUID, ad, newIPNet, vcn.ID, []string{*secList.ID}, routeTableID)
 			if err != nil {
 				return nil, errors.Trace(err)

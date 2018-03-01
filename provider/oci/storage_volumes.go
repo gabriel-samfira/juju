@@ -5,6 +5,7 @@ package oci
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -68,7 +69,7 @@ func (v *volumeSource) getVolumeStatus(resourceID *string) (string, error) {
 	return string(response.Volume.LifecycleState), nil
 }
 
-func (v *volumeSource) createVolume(p storage.VolumeParams, instanceMap map[string]*ociInstance) (_ *storage.Volume, err error) {
+func (v *volumeSource) createVolume(p storage.VolumeParams, instanceMap map[instance.Id]*ociInstance) (_ *storage.Volume, err error) {
 	var details ociCore.CreateVolumeResponse
 	defer func() {
 		if err != nil && details.ID != nil {
@@ -99,10 +100,11 @@ func (v *volumeSource) createVolume(p storage.VolumeParams, instanceMap map[stri
 	instanceId := p.Attachment.InstanceId
 	instance, ok := instanceMap[instanceId]
 	if !ok {
-		instance, err = v.env.getOciInstances(instanceId)
+		ociInstances, err := v.env.getOciInstances(instanceId)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+		instance = ociInstances[0]
 		instanceMap[instanceId] = instance
 	}
 
@@ -110,12 +112,12 @@ func (v *volumeSource) createVolume(p storage.VolumeParams, instanceMap map[stri
 	name := p.Tag.String()
 	volTags := p.ResourceTags
 	volTags[tags.JujuModel] = v.modelUUID
-
+	size := int(p.Size)
 	requestDetails := ociCore.CreateVolumeDetails{
 		AvailabilityDomain: &availabilityZone,
 		CompartmentID:      v.env.ecfg().compartmentID(),
 		DisplayName:        &name,
-		SizeInMBs:          p.Size,
+		SizeInMBs:          &size,
 		FreeFormTags:       volTags,
 	}
 
@@ -129,7 +131,7 @@ func (v *volumeSource) createVolume(p storage.VolumeParams, instanceMap map[stri
 	}
 	err = v.env.waitForResourceStatus(
 		v.getVolumeStatus, result.Volume.ID,
-		ociCore.VOLUME_LIFECYCLE_STATE_AVAILABLE,
+		string(ociCore.VOLUME_LIFECYCLE_STATE_AVAILABLE),
 		5*time.Minute)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -141,23 +143,24 @@ func (v *volumeSource) createVolume(p storage.VolumeParams, instanceMap map[stri
 		return nil, errors.Trace(err)
 	}
 
-	return &storage.Volume{p.Tag, makeVolumeInfo(volumeDetails)}, nil
+	return &storage.Volume{p.Tag, makeVolumeInfo(volumeDetails.Volume)}, nil
 }
 
 func makeVolumeInfo(vol ociCore.Volume) storage.VolumeInfo {
 	return storage.VolumeInfo{
-		VolumeId:   vol.ID,
-		Size:       vol.SizeInMBs,
+		VolumeId:   *vol.ID,
+		Size:       uint64(*vol.SizeInMBs),
 		Persistent: true,
 	}
 }
 
 func (v *volumeSource) CreateVolumes(params []storage.VolumeParams) ([]storage.CreateVolumesResult, error) {
+	logger.Debugf("Creating volumes: %v", params)
 	if params == nil {
 		return []storage.CreateVolumesResult{}, nil
 	}
 	results := make([]storage.CreateVolumesResult, len(params))
-	instanceMap := map[string]*ociInstance{}
+	instanceMap := map[instance.Id]*ociInstance{}
 	for i, volume := range params {
 		vol, err := v.createVolume(volume, instanceMap)
 		if err != nil {
@@ -183,7 +186,7 @@ func (v *volumeSource) allVolumes() (map[string]ociCore.Volume, error) {
 		if t, ok := val.FreeFormTags[tags.JujuModel]; !ok {
 			continue
 		} else {
-			if t != nil && *t != v.modelUUID {
+			if t != "" && t != v.modelUUID {
 				continue
 			}
 		}
@@ -232,23 +235,23 @@ func (v *volumeSource) DestroyVolumes(volIds []string) ([]error, error) {
 
 	errs := make([]error, len(volIds))
 
-	for idx, volume := range volumes {
+	for idx, volId := range volIds {
 		volumeDetails, ok := volumes[volId]
 		if !ok {
 			errs[idx] = errors.NotFoundf("no such volume %s", volId)
 			continue
 		}
 		request := ociCore.DeleteVolumeRequest{
-			VolumeID: volume.ID,
+			VolumeID: volumeDetails.ID,
 		}
 
-		response, err := v.api.DeleteVolume(context.Background(), request)
+		err = v.api.DeleteVolume(context.Background(), request)
 		if err != nil {
 			errs[idx] = errors.Trace(err)
 			continue
 		}
 		err = v.env.waitForResourceStatus(
-			v.getVolumeStatus, volume.ID,
+			v.getVolumeStatus, volumeDetails.ID,
 			string(ociCore.VOLUME_LIFECYCLE_STATE_TERMINATED),
 			5*time.Minute)
 		if err != nil && !errors.IsNotFound(err) {
@@ -294,7 +297,7 @@ func (v *volumeSource) ReleaseVolumes(volIds []string) ([]error, error) {
 				VolumeID:            volumeDetails.ID,
 			}
 
-			response, err := v.api.UpdateVolume(context.Background(), request)
+			_, err := v.api.UpdateVolume(context.Background(), request)
 			if err != nil {
 				errs[idx] = errors.Trace(err)
 			} else {
@@ -309,7 +312,7 @@ func (v *volumeSource) ValidateVolumeParams(params storage.VolumeParams) error {
 	size := mibToGib(params.Size)
 	if size < minVolumeSizeInGB || size > maxVolumeSizeInGB {
 		return errors.Errorf(
-			"invalid volume size %s. Valid range is %s - %s (GiB)", size, minVolumeSizeInGB, maxVolumeSizeInGB)
+			"invalid volume size %d. Valid range is %d - %d (GiB)", size, minVolumeSizeInGB, maxVolumeSizeInGB)
 	}
 	return nil
 }
@@ -324,7 +327,7 @@ func (v *volumeSource) volumeAttachments(instanceId instance.Id) ([]ociCore.IScs
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	ret := make([]ociCore.IScsiVolumeAttachment{}, len(result.Items))
+	ret := make([]ociCore.IScsiVolumeAttachment, len(result.Items))
 
 	for idx, att := range result.Items {
 		// The oracle oci client will return a VolumeAttachment type, which is an
@@ -353,16 +356,16 @@ func (v *volumeSource) volumeAttachments(instanceId instance.Id) ([]ociCore.IScs
 	return ret, nil
 }
 
-func makeVolumeAttachmentResult(attachment ociCore.IScsiVolumeAttachment) (storage.AttachVolumesResult, error) {
-	port, err := strconv.Itoa(*attachment.Port)
-	if err != nil {
-		return storage.AttachVolumesResult{}, errors.Annotate(err, "converting port from int to string")
+func makeVolumeAttachmentResult(attachment ociCore.IScsiVolumeAttachment, param storage.VolumeAttachmentParams) (storage.AttachVolumesResult, error) {
+	if attachment.Port == nil {
+		return storage.AttachVolumesResult{}, errors.Errorf("invalid port")
 	}
+	port := strconv.Itoa(*attachment.Port)
 	plugInfo := &storage.VolumeAttachmentPlugInfo{
 		DeviceType: storage.DiskTypeISCSI,
 		DeviceAttributes: map[string]string{
-			"iqn":     *val.Iqn,
-			"address": *val.Ipv4,
+			"iqn":     *attachment.Iqn,
+			"address": *attachment.Ipv4,
 			"port":    port,
 		},
 	}
@@ -379,7 +382,7 @@ func makeVolumeAttachmentResult(attachment ociCore.IScsiVolumeAttachment) (stora
 			},
 		},
 	}
-	return result
+	return result, nil
 }
 
 func (v *volumeSource) attachVolume(param storage.VolumeAttachmentParams) (_ storage.AttachVolumesResult, err error) {
@@ -412,9 +415,12 @@ func (v *volumeSource) attachVolume(param storage.VolumeAttachmentParams) (_ sto
 	}
 
 	for _, val := range volumeAttachments {
+		if val.VolumeID == nil || val.InstanceID == nil {
+			continue
+		}
 		if *val.VolumeID == param.VolumeId && *val.InstanceID == string(param.InstanceId) {
 			// Volume already attached. Return info.
-			return makeVolumeAttachmentResult(val)
+			return makeVolumeAttachmentResult(val, param)
 		}
 	}
 
@@ -431,25 +437,34 @@ func (v *volumeSource) attachVolume(param storage.VolumeAttachmentParams) (_ sto
 		AttachVolumeDetails: attachDetails,
 	}
 
-	details, err := v.api.AttachVolume(context.Background(), request)
+	details, err = v.api.AttachVolume(context.Background(), request)
 	if err != nil {
 		return storage.AttachVolumesResult{}, errors.Trace(err)
 	}
 
-	baseType, ok := details.VolumeAttachment.(ociCore.IScsiVolumeAttachment)
-	if !ok {
-		return nil, errors.Errorf("invalid attachment type. Expected iscsi")
-	}
-
 	err = v.env.waitForResourceStatus(
 		v.getAttachmentStatus, details.VolumeAttachment.GetID(),
-		ociCore.VOLUME_ATTACHMENT_LIFECYCLE_STATE_ATTACHED,
+		string(ociCore.VOLUME_ATTACHMENT_LIFECYCLE_STATE_ATTACHED),
 		5*time.Minute)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return storage.AttachVolumesResult{}, errors.Trace(err)
 	}
 
-	return makeVolumeAttachmentResult(baseType)
+	detailsReq := ociCore.GetVolumeAttachmentRequest{
+		VolumeAttachmentID: details.VolumeAttachment.GetID(),
+	}
+
+	response, err := v.api.GetVolumeAttachment(context.Background(), detailsReq)
+	if err != nil {
+		return storage.AttachVolumesResult{}, errors.Trace(err)
+	}
+
+	baseType, ok := response.VolumeAttachment.(ociCore.IScsiVolumeAttachment)
+	if !ok {
+		return storage.AttachVolumesResult{}, errors.Errorf("invalid attachment type. Expected iscsi")
+	}
+
+	return makeVolumeAttachmentResult(baseType, param)
 }
 
 func (v *volumeSource) getAttachmentStatus(resourceID *string) (string, error) {
@@ -481,9 +496,9 @@ func (v *volumeSource) AttachVolumes(params []storage.VolumeAttachmentParams) ([
 		return []storage.AttachVolumesResult{}, errors.Trace(err)
 	}
 
-	ret := make([]storage.AttachVolumesResult{}, len(params))
+	ret := make([]storage.AttachVolumesResult, len(params))
 	for idx, volParam := range params {
-		instance, ok := instancesAsMap[volParam.InstanceId]
+		_, ok := instancesAsMap[volParam.InstanceId]
 		if !ok {
 			// this really should not happen, given how getOciInstancesAsMap()
 			// works
@@ -516,25 +531,26 @@ func (v *volumeSource) DetachVolumes(params []storage.VolumeAttachmentParams) ([
 			instanceAttachmentMap[param.InstanceId] = instAtt
 		}
 		for _, attachment := range instAtt {
-			if param.VolumeId == *attachment.VolumeID && attachment.LifecycleState != ociCore.VOLUME_ATTACHMENT_LIFECYCLE_STATE_DETACHED {
+			logger.Tracef("volume ID is: %v", attachment.VolumeID)
+			if attachment.VolumeID != nil && param.VolumeId == *attachment.VolumeID && attachment.LifecycleState != ociCore.VOLUME_ATTACHMENT_LIFECYCLE_STATE_DETACHED {
 				if attachment.LifecycleState != ociCore.VOLUME_ATTACHMENT_LIFECYCLE_STATE_DETACHING {
 					request := ociCore.DetachVolumeRequest{
 						VolumeAttachmentID: attachment.ID,
 					}
 
-					err = v.api.DetachVolume(context.Background(), request)
+					err := v.api.DetachVolume(context.Background(), request)
 					if err != nil {
-						ret[i] = errors.Trace(err)
+						ret[idx] = errors.Trace(err)
 						break
 					}
 				}
-				err = v.env.waitForResourceStatus(
+				err := v.env.waitForResourceStatus(
 					v.getAttachmentStatus, attachment.ID,
-					ociCore.VOLUME_ATTACHMENT_LIFECYCLE_STATE_DETACHED,
+					string(ociCore.VOLUME_ATTACHMENT_LIFECYCLE_STATE_DETACHED),
 					5*time.Minute)
 				if err != nil && !errors.IsNotFound(err) {
 					ret[idx] = errors.Trace(err)
-					logger.Warningf("failed to detach volume: %s", *details.ID)
+					logger.Warningf("failed to detach volume: %s", *attachment.ID)
 				} else {
 					ret[idx] = nil
 				}

@@ -530,8 +530,6 @@ func findInstanceSpec(
 	aa, _ := json.MarshalIndent(images, "", "    ")
 	bb, _ := json.MarshalIndent(ic, "", "    ")
 	cc, _ := json.MarshalIndent(instanceType, "", "    ")
-	logger.Warningf(">>>>> %v --> %v --> %v", images, ic, instanceType)
-	logger.Warningf(">>>>> %s --> %s --> %s", aa, bb, cc)
 	spec, err := instances.FindInstanceSpec(images, ic, instanceType)
 	if err != nil {
 		return nil, "", errors.Trace(err)
