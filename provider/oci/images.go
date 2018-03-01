@@ -2,8 +2,6 @@ package oci
 
 import (
 	"context"
-	// "sort"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -527,9 +525,6 @@ func findInstanceSpec(
 	}
 
 	images := instances.ImageMetadataToImages(filtered)
-	aa, _ := json.MarshalIndent(images, "", "    ")
-	bb, _ := json.MarshalIndent(ic, "", "    ")
-	cc, _ := json.MarshalIndent(instanceType, "", "    ")
 	spec, err := instances.FindInstanceSpec(images, ic, instanceType)
 	if err != nil {
 		return nil, "", errors.Trace(err)
