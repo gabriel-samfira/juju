@@ -153,29 +153,25 @@ func (e *Environ) getSeclistStatus(resourceID *string) (string, error) {
 }
 
 func (e *Environ) getSecurityList(controllerUUID string, vcnid *string) (ociCore.SecurityList, error) {
-	name := e.secListName(controllerUUID)
 	request := ociCore.ListSecurityListsRequest{
 		CompartmentID: e.ecfg().compartmentID(),
 		VcnID:         vcnid,
 	}
-
 	response, err := e.cli.ListSecurityLists(context.Background(), request)
 	if err != nil {
 		return ociCore.SecurityList{}, errors.Trace(err)
 	}
 	if len(response.Items) == 0 {
-		return ociCore.SecurityList{}, errors.NotFoundf("security list %s does not exist", name)
+		return ociCore.SecurityList{}, errors.NotFoundf("no security lists found for vcn: %v", *vcnid)
 	}
 	for _, val := range response.Items {
-		if *val.DisplayName == name {
-			if tag, ok := val.FreeFormTags[tags.JujuController]; ok {
-				if tag == controllerUUID {
-					return val, nil
-				}
+		if tag, ok := val.FreeFormTags[tags.JujuController]; ok {
+			if tag == controllerUUID {
+				return val, nil
 			}
 		}
 	}
-	return ociCore.SecurityList{}, errors.NotFoundf("security list %s does not exist", name)
+	return ociCore.SecurityList{}, errors.NotFoundf("no security lists found for vcn: %v", *vcnid)
 }
 
 func (e *Environ) ensureSecurityList(controllerUUID string, vcnid *string) (ociCore.SecurityList, error) {
@@ -188,12 +184,12 @@ func (e *Environ) ensureSecurityList(controllerUUID string, vcnid *string) (ociC
 	}
 
 	prefix := "0.0.0.0/0"
-
+	name := e.secListName(controllerUUID)
 	// Hopefully just temporary, open all ingress/egress ports
 	details := ociCore.CreateSecurityListDetails{
 		CompartmentID: e.ecfg().compartmentID(),
 		VcnID:         vcnid,
-		DisplayName:   &controllerUUID,
+		DisplayName:   &name,
 		FreeFormTags: map[string]string{
 			tags.JujuController: controllerUUID,
 		},
@@ -453,8 +449,7 @@ func (e *Environ) ensureNetworksAndSubnets(controllerUUID string) (map[string][]
 // to a network.
 func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
 
-	if e.subnets == nil {
-		// We may have just started up, so lets see if we have a VCN created
+	if e.vcn.ID == nil {
 		vcn, err := e.getVcn(controllerUUID)
 		if err != nil {
 			if errors.IsNotFound(err) {
@@ -462,37 +457,29 @@ func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
 				return nil
 			}
 		}
+		e.vcn = vcn
+	}
 
-		allSubnets, err := e.allSubnets(controllerUUID, vcn.ID)
+	if e.subnets == nil {
+		allSubnets, err := e.allSubnets(controllerUUID, e.vcn.ID)
 		if err != nil {
 			return errors.Trace(err)
 		}
 		e.subnets = allSubnets
 	}
-
-	secLists := map[string]bool{}
-	vcn, err := e.getVcn(controllerUUID)
-	if err != nil {
-		if !errors.IsNotFound(err) {
-			return errors.Trace(err)
-		}
+	vcnID := e.vcn.ID
+	secList, err := e.getSecurityList(controllerUUID, vcnID)
+	if err != nil && !errors.IsNotFound(err) {
+		return errors.Trace(err)
 	}
-
-	vcnID := vcn.ID
 	for _, adSubnets := range e.subnets {
 		for _, subnet := range adSubnets {
-			for _, secListId := range subnet.SecurityListIds {
-				secLists[secListId] = true
-			}
 			if vcnID != nil {
 				if *vcnID != *subnet.VcnID {
 					return errors.Errorf(
 						"Found a subnet with a different vcnID. This should not happen. Vcn: %s, subnet: %s", *vcnID, *subnet.VcnID)
 				}
 			}
-			vcnID = subnet.VcnID
-
-			logger.Infof("removing subnet with ID: %s", *subnet.ID)
 			request := ociCore.DeleteSubnetRequest{
 				SubnetID: subnet.ID,
 			}
@@ -512,24 +499,23 @@ func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
 		}
 	}
 
-	for secList, _ := range secLists {
+	if secList.ID != nil {
 		request := ociCore.DeleteSecurityListRequest{
-			SecurityListID: &secList,
+			SecurityListID: secList.ID,
 		}
-		logger.Infof("removing security list: %s", secList)
-		err := e.cli.DeleteSecurityList(context.Background(), request)
+		logger.Infof("deleting security list %s", *secList.ID)
+		err = e.cli.DeleteSecurityList(context.Background(), request)
 		if err != nil {
 			return nil
 		}
 		err = e.waitForResourceStatus(
-			e.getSeclistStatus, &secList,
+			e.getSeclistStatus, secList.ID,
 			string(ociCore.SECURITY_LIST_LIFECYCLE_STATE_TERMINATED),
 			5*time.Minute)
 		if !errors.IsNotFound(err) {
 			return err
 		}
 	}
-
 	if err := e.deleteRouteTable(controllerUUID, vcnID); err != nil {
 		return errors.Trace(err)
 	}
@@ -538,13 +524,13 @@ func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
 		return errors.Trace(err)
 	}
 
-	request := ociCore.DeleteVcnRequest{
+	requestDeleteVcn := ociCore.DeleteVcnRequest{
 		VcnID: vcnID,
 	}
 
 	if vcnID != nil {
 		logger.Infof("deleting VCN: %s", *vcnID)
-		err := e.cli.DeleteVcn(context.Background(), request)
+		err := e.cli.DeleteVcn(context.Background(), requestDeleteVcn)
 
 		err = e.waitForResourceStatus(
 			e.getVCNStatus, vcnID,

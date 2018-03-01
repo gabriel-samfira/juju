@@ -374,7 +374,7 @@ func (e *Environ) DestroyController(controllerUUID string) error {
 	if err != nil {
 		return err
 	}
-
+	logger.Warningf("Cleaning up network resources")
 	return e.cleanupNetworksAndSubnets(controllerUUID)
 }
 
