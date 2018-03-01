@@ -13,6 +13,9 @@ import (
 	"github.com/juju/errors"
 	"github.com/juju/utils/arch"
 	"github.com/juju/utils/clock"
+	"github.com/juju/utils/os"
+	"github.com/juju/utils/packaging/commands"
+	jujuseries "github.com/juju/utils/series"
 	"github.com/juju/version"
 
 	"github.com/juju/juju/cloudconfig/cloudinit"
@@ -400,6 +403,36 @@ func (e *Environ) StorageProvider(t storage.ProviderType) (storage.Provider, err
 	return nil, errors.NotFoundf("storage provider %q", t)
 }
 
+// getCloudInitConfig returns a CloudConfig instance. The default oracle images come
+// bundled with iptables-persistent which maintains a number of iptables firewall rules
+// We remove this package and the rules
+func (e *Environ) getCloudInitConfig(series string) (cloudinit.CloudConfig, error) {
+	// TODO (gsamfira): remove this function when the above mention bug is fixed
+	cloudcfg, err := cloudinit.New(series)
+	if err != nil {
+		return nil, errors.Annotate(err, "cannot create cloudinit template")
+	}
+	operatingSystem, err := jujuseries.GetOSFromSeries(series)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	comander, err := commands.NewPackageCommander(series)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	cloudcfg.AddRunCmd("/sbin/iptables -F")
+	cloudcfg.AddRunCmd("/sbin/iptables -t nat -F")
+	switch operatingSystem {
+	case os.Ubuntu:
+		iptablesRemove := comander.RemoveCmd("iptables-persistent")
+		cloudcfg.AddScripts(iptablesRemove)
+	case os.CentOS:
+		cloudcfg.AddRunCmd("systemctl stop firewalld")
+		cloudcfg.AddRunCmd("systemctl disable firewalld")
+	}
+	return cloudcfg, nil
+}
+
 // StartInstance implements environs.InstanceBroker.
 func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.StartInstanceResult, error) {
 	// var types []instances.InstanceType
@@ -454,7 +487,6 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 			Constraints: args.Constraints,
 		},
 	)
-	logger.Warningf("FindSpec: %v --> %v --> %v", spec, image, err)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -492,7 +524,7 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 		desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_PROVISIONING
 	}
 
-	cloudcfg, err := cloudinit.New(series)
+	cloudcfg, err := e.getCloudInitConfig(series)
 	if err != nil {
 		return nil, errors.Annotate(err, "cannot create cloudinit template")
 	}
