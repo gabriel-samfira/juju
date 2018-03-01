@@ -299,6 +299,9 @@ func (e *Environ) allInstances(tags map[string]string) ([]*ociInstance, error) {
 
 	ret := []*ociInstance{}
 	for _, val := range response.Items {
+		if val.LifecycleState == ociCore.INSTANCE_LIFECYCLE_STATE_TERMINATED {
+			continue
+		}
 		missingTag := false
 		for i, j := range tags {
 			tagVal, ok := val.FreeFormTags[i]
