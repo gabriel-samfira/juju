@@ -81,7 +81,7 @@ func (o *ociClient) Ping() error {
 		return errors.Trace(err)
 	}
 	request := ociIdentity.ListCompartmentsRequest{
-		CompartmentID: &tenancyID,
+		CompartmentId: &tenancyID,
 	}
 	ctx := context.Background()
 	_, err = o.ListCompartments(ctx, request)
@@ -91,8 +91,8 @@ func (o *ociClient) Ping() error {
 func (o *ociClient) GetInstanceVnicAttachments(instanceID instance.Id, compartmentID *string) (ociCore.ListVnicAttachmentsResponse, error) {
 	instID := string(instanceID)
 	request := ociCore.ListVnicAttachmentsRequest{
-		CompartmentID: compartmentID,
-		InstanceID:    &instID,
+		CompartmentId: compartmentID,
+		InstanceId:    &instID,
 	}
 	response, err := o.ListVnicAttachments(context.Background(), request)
 	if err != nil {
@@ -105,9 +105,9 @@ func (o *ociClient) GetInstanceVnics(vnics []ociCore.VnicAttachment) ([]ociCore.
 	result := []ociCore.GetVnicResponse{}
 
 	for _, val := range vnics {
-		vnicID := val.VnicID
+		vnicID := val.VnicId
 		request := ociCore.GetVnicRequest{
-			VnicID: vnicID,
+			VnicId: vnicID,
 		}
 		response, err := o.GetVnic(context.Background(), request)
 		if err != nil {

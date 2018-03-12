@@ -46,7 +46,7 @@ func (e *Environ) vcnName(controllerUUID string) *string {
 
 func (e *Environ) getVCNStatus(vcnID *string) (string, error) {
 	request := ociCore.GetVcnRequest{
-		VcnID: vcnID,
+		VcnId: vcnID,
 	}
 
 	response, err := e.cli.GetVcn(context.Background(), request)
@@ -62,7 +62,7 @@ func (e *Environ) getVCNStatus(vcnID *string) (string, error) {
 
 func (e *Environ) getVcn(controllerUUID string) (ociCore.Vcn, error) {
 	request := ociCore.ListVcnsRequest{
-		CompartmentID: e.ecfg().compartmentID(),
+		CompartmentId: e.ecfg().compartmentID(),
 	}
 
 	response, err := e.cli.ListVcns(context.Background(), request)
@@ -109,7 +109,7 @@ func (e *Environ) ensureVCN(controllerUUID string) (ociCore.Vcn, error) {
 	addressSpace := DefaultAddressSpace
 	vcnDetails := ociCore.CreateVcnDetails{
 		CidrBlock:     &addressSpace,
-		CompartmentID: e.ecfg().compartmentID(),
+		CompartmentId: e.ecfg().compartmentID(),
 		DisplayName:   name,
 		DnsLabel:      &DnsLabelTld,
 		FreeFormTags: map[string]string{
@@ -124,10 +124,10 @@ func (e *Environ) ensureVCN(controllerUUID string) (ociCore.Vcn, error) {
 	if err != nil {
 		return ociCore.Vcn{}, errors.Trace(err)
 	}
-	logger.Debugf("VCN %s created. Waiting for status: %s", *result.Vcn.ID, string(ociCore.VCN_LIFECYCLE_STATE_AVAILABLE))
+	logger.Debugf("VCN %s created. Waiting for status: %s", *result.Vcn.Id, string(ociCore.VcnLifecycleStateAvailable))
 	err = e.waitForResourceStatus(
-		e.getVCNStatus, result.Vcn.ID,
-		string(ociCore.VCN_LIFECYCLE_STATE_AVAILABLE),
+		e.getVCNStatus, result.Vcn.Id,
+		string(ociCore.VcnLifecycleStateAvailable),
 		5*time.Minute)
 	if err != nil {
 		return ociCore.Vcn{}, errors.Trace(err)
@@ -138,7 +138,7 @@ func (e *Environ) ensureVCN(controllerUUID string) (ociCore.Vcn, error) {
 
 func (e *Environ) getSeclistStatus(resourceID *string) (string, error) {
 	request := ociCore.GetSecurityListRequest{
-		SecurityListID: resourceID,
+		SecurityListId: resourceID,
 	}
 
 	response, err := e.cli.GetSecurityList(context.Background(), request)
@@ -154,8 +154,8 @@ func (e *Environ) getSeclistStatus(resourceID *string) (string, error) {
 
 func (e *Environ) getSecurityList(controllerUUID string, vcnid *string) (ociCore.SecurityList, error) {
 	request := ociCore.ListSecurityListsRequest{
-		CompartmentID: e.ecfg().compartmentID(),
-		VcnID:         vcnid,
+		CompartmentId: e.ecfg().compartmentID(),
+		VcnId:         vcnid,
 	}
 	response, err := e.cli.ListSecurityLists(context.Background(), request)
 	if err != nil {
@@ -187,8 +187,8 @@ func (e *Environ) ensureSecurityList(controllerUUID string, vcnid *string) (ociC
 	name := e.secListName(controllerUUID)
 	// Hopefully just temporary, open all ingress/egress ports
 	details := ociCore.CreateSecurityListDetails{
-		CompartmentID: e.ecfg().compartmentID(),
-		VcnID:         vcnid,
+		CompartmentId: e.ecfg().compartmentID(),
+		VcnId:         vcnid,
 		DisplayName:   &name,
 		FreeFormTags: map[string]string{
 			tags.JujuController: controllerUUID,
@@ -217,8 +217,8 @@ func (e *Environ) ensureSecurityList(controllerUUID string, vcnid *string) (ociC
 	}
 
 	err = e.waitForResourceStatus(
-		e.getSeclistStatus, response.SecurityList.ID,
-		string(ociCore.SECURITY_LIST_LIFECYCLE_STATE_AVAILABLE),
+		e.getSeclistStatus, response.SecurityList.Id,
+		string(ociCore.SecurityListLifecycleStateAvailable),
 		5*time.Minute)
 	if err != nil {
 		return ociCore.SecurityList{}, errors.Trace(err)
@@ -228,8 +228,8 @@ func (e *Environ) ensureSecurityList(controllerUUID string, vcnid *string) (ociC
 
 func (e *Environ) allSubnets(controllerUUID string, vcnID *string) (map[string][]ociCore.Subnet, error) {
 	request := ociCore.ListSubnetsRequest{
-		CompartmentID: e.ecfg().compartmentID(),
-		VcnID:         vcnID,
+		CompartmentId: e.ecfg().compartmentID(),
+		VcnId:         vcnID,
 	}
 	response, err := e.cli.ListSubnets(context.Background(), request)
 	if err != nil {
@@ -292,7 +292,7 @@ func (e *Environ) getFreeSubnet(existing map[string]bool) (string, error) {
 
 func (e *Environ) getSubnetStatus(resourceID *string) (string, error) {
 	request := ociCore.GetSubnetRequest{
-		SubnetID: resourceID,
+		SubnetId: resourceID,
 	}
 
 	response, err := e.cli.GetSubnet(context.Background(), request)
@@ -313,10 +313,10 @@ func (e *Environ) createSubnet(controllerUUID, ad, cidr string, vcnID *string, s
 	subnetDetails := ociCore.CreateSubnetDetails{
 		AvailabilityDomain: &ad,
 		CidrBlock:          &cidr,
-		CompartmentID:      compartment,
-		VcnID:              vcnID,
+		CompartmentId:      compartment,
+		VcnId:              vcnID,
 		DisplayName:        &displayName,
-		RouteTableID:       routeRableID,
+		RouteTableId:       routeRableID,
 		SecurityListIds:    seclists,
 		// DnsLabel:           &providerNetwork.DnsLabel,
 		FreeFormTags: map[string]string{
@@ -333,8 +333,8 @@ func (e *Environ) createSubnet(controllerUUID, ad, cidr string, vcnID *string, s
 		return ociCore.Subnet{}, errors.Trace(err)
 	}
 	err = e.waitForResourceStatus(
-		e.getSubnetStatus, response.Subnet.ID,
-		string(ociCore.SUBNET_LIFECYCLE_STATE_AVAILABLE),
+		e.getSubnetStatus, response.Subnet.Id,
+		string(ociCore.SubnetLifecycleStateAvailable),
 		5*time.Minute)
 	if err != nil {
 		return ociCore.Subnet{}, errors.Trace(err)
@@ -348,7 +348,7 @@ func (e *Environ) ensureSubnets(vcn ociCore.Vcn, secList ociCore.SecurityList, c
 		return nil, errors.Trace(err)
 	}
 
-	allSubnets, err := e.allSubnets(controllerUUID, vcn.ID)
+	allSubnets, err := e.allSubnets(controllerUUID, vcn.Id)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -374,7 +374,7 @@ func (e *Environ) ensureSubnets(vcn ociCore.Vcn, secList ociCore.SecurityList, c
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
-			newSubnet, err := e.createSubnet(controllerUUID, ad, newIPNet, vcn.ID, []string{*secList.ID}, routeTableID)
+			newSubnet, err := e.createSubnet(controllerUUID, ad, newIPNet, vcn.Id, []string{*secList.Id}, routeTableID)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
@@ -409,12 +409,12 @@ func (e *Environ) ensureNetworksAndSubnets(controllerUUID string) (map[string][]
 	// * There is no way to specify the target prefix for an Ingress/Egress rule, thus making
 	// instance level firewalling, impossible.
 	// For now, we open all ports until we decide how to properly take care of this.
-	secList, err := e.ensureSecurityList(controllerUUID, vcn.ID)
+	secList, err := e.ensureSecurityList(controllerUUID, vcn.Id)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	ig, err := e.ensureInternetGateway(controllerUUID, vcn.ID)
+	ig, err := e.ensureInternetGateway(controllerUUID, vcn.Id)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -426,15 +426,15 @@ func (e *Environ) ensureNetworksAndSubnets(controllerUUID string) (map[string][]
 	routeRules := []ociCore.RouteRule{
 		ociCore.RouteRule{
 			CidrBlock:       &prefix,
-			NetworkEntityID: ig.ID,
+			NetworkEntityId: ig.Id,
 		},
 	}
-	routeTable, err := e.ensureRouteTable(controllerUUID, vcn.ID, routeRules)
+	routeTable, err := e.ensureRouteTable(controllerUUID, vcn.Id, routeRules)
 	if err != nil {
 		return nil, err
 	}
 
-	subnets, err := e.ensureSubnets(vcn, secList, controllerUUID, routeTable.ID)
+	subnets, err := e.ensureSubnets(vcn, secList, controllerUUID, routeTable.Id)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -449,7 +449,7 @@ func (e *Environ) ensureNetworksAndSubnets(controllerUUID string) (map[string][]
 // to a network.
 func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
 
-	if e.vcn.ID == nil {
+	if e.vcn.Id == nil {
 		vcn, err := e.getVcn(controllerUUID)
 		if err != nil {
 			if errors.IsNotFound(err) {
@@ -461,13 +461,13 @@ func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
 	}
 
 	if e.subnets == nil {
-		allSubnets, err := e.allSubnets(controllerUUID, e.vcn.ID)
+		allSubnets, err := e.allSubnets(controllerUUID, e.vcn.Id)
 		if err != nil {
 			return errors.Trace(err)
 		}
 		e.subnets = allSubnets
 	}
-	vcnID := e.vcn.ID
+	vcnID := e.vcn.Id
 	secList, err := e.getSecurityList(controllerUUID, vcnID)
 	if err != nil && !errors.IsNotFound(err) {
 		return errors.Trace(err)
@@ -475,23 +475,23 @@ func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
 	for _, adSubnets := range e.subnets {
 		for _, subnet := range adSubnets {
 			if vcnID != nil {
-				if *vcnID != *subnet.VcnID {
+				if *vcnID != *subnet.VcnId {
 					return errors.Errorf(
-						"Found a subnet with a different vcnID. This should not happen. Vcn: %s, subnet: %s", *vcnID, *subnet.VcnID)
+						"Found a subnet with a different vcnID. This should not happen. Vcn: %s, subnet: %s", *vcnID, *subnet.VcnId)
 				}
 			}
 			request := ociCore.DeleteSubnetRequest{
-				SubnetID: subnet.ID,
+				SubnetId: subnet.Id,
 			}
 			// we may need to wait for resource to be deleted
-			err := e.cli.DeleteSubnet(context.Background(), request)
+			response, err := e.cli.DeleteSubnet(context.Background(), request)
 			// Should we attempt to delete all subnets and return an array of errors?
-			if err != nil {
+			if err != nil && !e.isNotFound(response.RawResponse) {
 				return errors.Trace(err)
 			}
 			err = e.waitForResourceStatus(
-				e.getSubnetStatus, subnet.ID,
-				string(ociCore.SUBNET_LIFECYCLE_STATE_TERMINATED),
+				e.getSubnetStatus, subnet.Id,
+				string(ociCore.SubnetLifecycleStateTerminated),
 				5*time.Minute)
 			if err != nil && !errors.IsNotFound(err) {
 				return err
@@ -499,18 +499,18 @@ func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
 		}
 	}
 
-	if secList.ID != nil {
+	if secList.Id != nil {
 		request := ociCore.DeleteSecurityListRequest{
-			SecurityListID: secList.ID,
+			SecurityListId: secList.Id,
 		}
-		logger.Infof("deleting security list %s", *secList.ID)
-		err = e.cli.DeleteSecurityList(context.Background(), request)
-		if err != nil {
+		logger.Infof("deleting security list %s", *secList.Id)
+		response, err := e.cli.DeleteSecurityList(context.Background(), request)
+		if err != nil && !e.isNotFound(response.RawResponse) {
 			return nil
 		}
 		err = e.waitForResourceStatus(
-			e.getSeclistStatus, secList.ID,
-			string(ociCore.SECURITY_LIST_LIFECYCLE_STATE_TERMINATED),
+			e.getSeclistStatus, secList.Id,
+			string(ociCore.SubnetLifecycleStateTerminated),
 			5*time.Minute)
 		if !errors.IsNotFound(err) {
 			return err
@@ -525,16 +525,18 @@ func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
 	}
 
 	requestDeleteVcn := ociCore.DeleteVcnRequest{
-		VcnID: vcnID,
+		VcnId: vcnID,
 	}
 
 	if vcnID != nil {
 		logger.Infof("deleting VCN: %s", *vcnID)
-		err := e.cli.DeleteVcn(context.Background(), requestDeleteVcn)
-
+		response, err := e.cli.DeleteVcn(context.Background(), requestDeleteVcn)
+		if err != nil && !e.isNotFound(response.RawResponse) {
+			return err
+		}
 		err = e.waitForResourceStatus(
 			e.getVCNStatus, vcnID,
-			string(ociCore.VCN_LIFECYCLE_STATE_TERMINATED),
+			string(ociCore.VcnLifecycleStateTerminated),
 			5*time.Minute)
 		if !errors.IsNotFound(err) {
 			return err
@@ -545,7 +547,7 @@ func (e *Environ) cleanupNetworksAndSubnets(controllerUUID string) error {
 
 func (e *Environ) getInternetGatewayStatus(resourceID *string) (string, error) {
 	request := ociCore.GetInternetGatewayRequest{
-		IgID: resourceID,
+		IgId: resourceID,
 	}
 
 	response, err := e.cli.GetInternetGateway(context.Background(), request)
@@ -561,8 +563,8 @@ func (e *Environ) getInternetGatewayStatus(resourceID *string) (string, error) {
 
 func (e *Environ) getInternetGateway(vcnID *string) (ociCore.InternetGateway, error) {
 	request := ociCore.ListInternetGatewaysRequest{
-		CompartmentID: e.ecfg().compartmentID(),
-		VcnID:         vcnID,
+		CompartmentId: e.ecfg().compartmentID(),
+		VcnId:         vcnID,
 	}
 
 	response, err := e.cli.ListInternetGateways(context.Background(), request)
@@ -592,8 +594,8 @@ func (e *Environ) ensureInternetGateway(controllerUUID string, vcnID *string) (o
 
 	enabled := true
 	details := ociCore.CreateInternetGatewayDetails{
-		VcnID:         vcnID,
-		CompartmentID: e.ecfg().compartmentID(),
+		VcnId:         vcnID,
+		CompartmentId: e.ecfg().compartmentID(),
 		IsEnabled:     &enabled,
 		DisplayName:   e.internetGatewayName(controllerUUID),
 	}
@@ -609,8 +611,8 @@ func (e *Environ) ensureInternetGateway(controllerUUID string, vcnID *string) (o
 
 	if err := e.waitForResourceStatus(
 		e.getInternetGatewayStatus,
-		response.InternetGateway.ID,
-		string(ociCore.INTERNET_GATEWAY_LIFECYCLE_STATE_AVAILABLE),
+		response.InternetGateway.Id,
+		string(ociCore.InternetGatewayLifecycleStateAvailable),
 		5*time.Minute); err != nil {
 
 		return ociCore.InternetGateway{}, errors.Trace(err)
@@ -627,8 +629,8 @@ func (e *Environ) deleteInternetGateway(vcnID *string) error {
 		}
 		return nil
 	}
-	terminatingStatus := ociCore.INTERNET_GATEWAY_LIFECYCLE_STATE_TERMINATING
-	terminatedStatus := ociCore.INTERNET_GATEWAY_LIFECYCLE_STATE_TERMINATED
+	terminatingStatus := ociCore.InternetGatewayLifecycleStateTerminating
+	terminatedStatus := ociCore.InternetGatewayLifecycleStateTerminated
 	if ig.LifecycleState == terminatedStatus {
 		return nil
 	}
@@ -636,17 +638,17 @@ func (e *Environ) deleteInternetGateway(vcnID *string) error {
 	if ig.LifecycleState != terminatingStatus {
 
 		request := ociCore.DeleteInternetGatewayRequest{
-			IgID: ig.ID,
+			IgId: ig.Id,
 		}
 
-		err = e.cli.DeleteInternetGateway(context.Background(), request)
-		if err != nil {
+		response, err := e.cli.DeleteInternetGateway(context.Background(), request)
+		if err != nil && !e.isNotFound(response.RawResponse) {
 			return errors.Trace(err)
 		}
 	}
 	if err := e.waitForResourceStatus(
 		e.getInternetGatewayStatus,
-		ig.ID,
+		ig.Id,
 		string(terminatedStatus),
 		5*time.Minute); err != nil {
 
@@ -660,8 +662,8 @@ func (e *Environ) deleteInternetGateway(vcnID *string) error {
 
 func (e *Environ) getRouteTable(controllerUUID string, vcnID *string) (ociCore.RouteTable, error) {
 	request := ociCore.ListRouteTablesRequest{
-		CompartmentID: e.ecfg().compartmentID(),
-		VcnID:         vcnID,
+		CompartmentId: e.ecfg().compartmentID(),
+		VcnId:         vcnID,
 	}
 
 	response, err := e.cli.ListRouteTables(context.Background(), request)
@@ -686,7 +688,7 @@ func (e *Environ) routeTableName(controllerUUID string) *string {
 
 func (e *Environ) getRouteTableStatus(resourceID *string) (string, error) {
 	request := ociCore.GetRouteTableRequest{
-		RtID: resourceID,
+		RtId: resourceID,
 	}
 
 	response, err := e.cli.GetRouteTable(context.Background(), request)
@@ -710,8 +712,8 @@ func (e *Environ) ensureRouteTable(controllerUUID string, vcnID *string, routeRu
 	}
 
 	details := ociCore.CreateRouteTableDetails{
-		VcnID:         vcnID,
-		CompartmentID: e.ecfg().compartmentID(),
+		VcnId:         vcnID,
+		CompartmentId: e.ecfg().compartmentID(),
 		RouteRules:    routeRules,
 		DisplayName:   e.routeTableName(controllerUUID),
 		FreeFormTags: map[string]string{
@@ -730,8 +732,8 @@ func (e *Environ) ensureRouteTable(controllerUUID string, vcnID *string, routeRu
 
 	if err := e.waitForResourceStatus(
 		e.getRouteTableStatus,
-		response.RouteTable.ID,
-		string(ociCore.ROUTE_TABLE_LIFECYCLE_STATE_AVAILABLE),
+		response.RouteTable.Id,
+		string(ociCore.RouteTableLifecycleStateAvailable),
 		5*time.Minute); err != nil {
 
 		return ociCore.RouteTable{}, errors.Trace(err)
@@ -749,25 +751,25 @@ func (e *Environ) deleteRouteTable(controllerUUID string, vcnID *string) error {
 		return nil
 	}
 
-	if rt.LifecycleState == ociCore.ROUTE_TABLE_LIFECYCLE_STATE_TERMINATED {
+	if rt.LifecycleState == ociCore.RouteTableLifecycleStateTerminated {
 		return nil
 	}
 
-	if rt.LifecycleState != ociCore.ROUTE_TABLE_LIFECYCLE_STATE_TERMINATING {
+	if rt.LifecycleState != ociCore.RouteTableLifecycleStateTerminating {
 		request := ociCore.DeleteRouteTableRequest{
-			RtID: rt.ID,
+			RtId: rt.Id,
 		}
 
-		err := e.cli.DeleteRouteTable(context.Background(), request)
-		if err != nil {
+		response, err := e.cli.DeleteRouteTable(context.Background(), request)
+		if err != nil && !e.isNotFound(response.RawResponse) {
 			return errors.Trace(err)
 		}
 	}
 
 	if err := e.waitForResourceStatus(
 		e.getRouteTableStatus,
-		rt.ID,
-		string(ociCore.ROUTE_TABLE_LIFECYCLE_STATE_TERMINATED),
+		rt.Id,
+		string(ociCore.RouteTableLifecycleStateTerminated),
 		5*time.Minute); err != nil {
 
 		if !errors.IsNotFound(err) {

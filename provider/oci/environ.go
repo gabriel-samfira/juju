@@ -5,7 +5,7 @@ package oci
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -14,7 +14,6 @@ import (
 	"github.com/juju/utils/arch"
 	"github.com/juju/utils/clock"
 	"github.com/juju/utils/os"
-	"github.com/juju/utils/packaging/commands"
 	jujuseries "github.com/juju/utils/series"
 	"github.com/juju/version"
 
@@ -79,7 +78,7 @@ func (e *Environ) AvailabilityZones() ([]common.AvailabilityZone, error) {
 		return nil, errors.Trace(err)
 	}
 	request := ociIdentity.ListAvailabilityDomainsRequest{
-		CompartmentID: &ocid,
+		CompartmentId: &ocid,
 	}
 	ctx := context.Background()
 	domains, err := e.cli.ListAvailabilityDomains(ctx, request)
@@ -118,7 +117,7 @@ func (e *Environ) getOciInstances(ids ...instance.Id) ([]*ociInstance, error) {
 
 	compartmentID := e.ecfg().compartmentID()
 	request := ociCore.ListInstancesRequest{
-		CompartmentID: compartmentID,
+		CompartmentId: compartmentID,
 	}
 
 	instances, err := e.cli.ListInstances(context.Background(), request)
@@ -293,7 +292,7 @@ func (e *Environ) ecfg() *environConfig {
 func (e *Environ) allInstances(tags map[string]string) ([]*ociInstance, error) {
 	compartment := e.ecfg().compartmentID()
 	request := ociCore.ListInstancesRequest{
-		CompartmentID: compartment,
+		CompartmentId: compartment,
 	}
 	response, err := e.cli.ListInstances(context.Background(), request)
 	if err != nil {
@@ -302,7 +301,7 @@ func (e *Environ) allInstances(tags map[string]string) ([]*ociInstance, error) {
 
 	ret := []*ociInstance{}
 	for _, val := range response.Items {
-		if val.LifecycleState == ociCore.INSTANCE_LIFECYCLE_STATE_TERMINATED {
+		if val.LifecycleState == ociCore.InstanceLifecycleStateTerminated {
 			continue
 		}
 		missingTag := false
@@ -404,31 +403,33 @@ func (e *Environ) StorageProvider(t storage.ProviderType) (storage.Provider, err
 }
 
 // getCloudInitConfig returns a CloudConfig instance. The default oracle images come
-// bundled with iptables-persistent which maintains a number of iptables firewall rules
-// We remove this package and the rules
-func (e *Environ) getCloudInitConfig(series string) (cloudinit.CloudConfig, error) {
+// bundled with iptables-persistent on Ubuntu and firewalld on CentOS, which maintains
+// a number of iptables firewall rules. We need to at least allow the juju API port for state
+// machines. SSH port is allowed by default on linux images.
+func (e *Environ) getCloudInitConfig(series string, apiPort int) (cloudinit.CloudConfig, error) {
 	// TODO (gsamfira): remove this function when the above mention bug is fixed
 	cloudcfg, err := cloudinit.New(series)
 	if err != nil {
 		return nil, errors.Annotate(err, "cannot create cloudinit template")
 	}
+
+	if apiPort == 0 {
+		return cloudcfg, nil
+	}
+
 	operatingSystem, err := jujuseries.GetOSFromSeries(series)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	comander, err := commands.NewPackageCommander(series)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	cloudcfg.AddRunCmd("/sbin/iptables -F")
-	cloudcfg.AddRunCmd("/sbin/iptables -t nat -F")
 	switch operatingSystem {
 	case os.Ubuntu:
-		iptablesRemove := comander.RemoveCmd("iptables-persistent")
-		cloudcfg.AddScripts(iptablesRemove)
+		fwCmd := fmt.Sprintf(
+			"/sbin/iptables -I INPUT -p tcp --dport %d -j ACCEPT", apiPort)
+		cloudcfg.AddRunCmd(fwCmd)
+		cloudcfg.AddScripts("/etc/init.d/netfilter-persistent save")
 	case os.CentOS:
-		cloudcfg.AddRunCmd("systemctl stop firewalld")
-		cloudcfg.AddRunCmd("systemctl disable firewalld")
+		fwCmd := fmt.Sprintf("firewall-cmd --zone=public --add-port=%d/tcp --permanent", apiPort)
+		cloudcfg.AddRunCmd(fwCmd)
 	}
 	return cloudcfg, nil
 }
@@ -512,19 +513,17 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 	}
 	tags := args.InstanceConfig.Tags
 
-	// var apiPort int
+	var apiPort int
 	var desiredStatus ociCore.InstanceLifecycleStateEnum
 	// Wait for controller to actually be running
 	if args.InstanceConfig.Controller != nil {
-		// apiPort = args.InstanceConfig.Controller.Config.APIPort()
-		desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_RUNNING
+		apiPort = args.InstanceConfig.Controller.Config.APIPort()
+		desiredStatus = ociCore.InstanceLifecycleStateRunning
 	} else {
-		// All ports are the same so pick the first.
-		// apiPort = args.InstanceConfig.APIInfo.Ports()[0]
-		desiredStatus = ociCore.INSTANCE_LIFECYCLE_STATE_PROVISIONING
+		desiredStatus = ociCore.InstanceLifecycleStateProvisioning
 	}
 
-	cloudcfg, err := e.getCloudInitConfig(series)
+	cloudcfg, err := e.getCloudInitConfig(series, apiPort)
 	if err != nil {
 		return nil, errors.Annotate(err, "cannot create cloudinit template")
 	}
@@ -540,21 +539,18 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 		return nil, errors.Annotate(err, "cannot make user data")
 	}
 
-	logger.Debugf("userdata: %s", userData)
-
 	// NOTE(gsamfira): Should we make this configurable?
 	// TODO(gsamfira): select Availability Domain and subnet ID
 	assignPublicIp := true
 	instanceDetails := ociCore.LaunchInstanceDetails{
 		AvailabilityDomain: &zone,
-		CompartmentID:      e.ecfg().compartmentID(),
-		ImageID:            &image,
+		CompartmentId:      e.ecfg().compartmentID(),
+		ImageId:            &image,
 		Shape:              &spec.InstanceType.Name,
 		CreateVnicDetails: &ociCore.CreateVnicDetails{
-			SubnetID:       network.ID,
+			SubnetId:       network.Id,
 			AssignPublicIp: &assignPublicIp,
 			DisplayName:    &hostname,
-			// HostnameLabel:  &hostname,
 		},
 		DisplayName: &hostname,
 		Metadata: map[string]string{
@@ -563,8 +559,6 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 		FreeFormTags: tags,
 	}
 
-	aa, _ := json.MarshalIndent(instanceDetails, "", "    ")
-	logger.Warningf("Launching instance with details: %s", aa)
 	request := ociCore.LaunchInstanceRequest{
 		LaunchInstanceDetails: instanceDetails,
 	}
@@ -579,7 +573,7 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 		return nil, errors.Trace(err)
 	}
 
-	machineId := response.Instance.ID
+	machineId := response.Instance.Id
 	timeout := 10 * time.Minute
 	if err := instance.waitForMachineStatus(desiredStatus, timeout); err != nil {
 		return nil, errors.Trace(err)
@@ -623,13 +617,12 @@ func (o *Environ) terminateInstances(instances ...*ociInstance) error {
 	for _, oInst := range instances {
 		go func(inst *ociInstance) {
 			defer wg.Done()
-			logger.Warningf("Terminating: %s", inst.Id())
 			if err := inst.deleteInstance(); err != nil {
 				instIds = append(instIds, inst.Id())
 				errs = append(errs, err)
 			} else {
 				err := inst.waitForMachineStatus(
-					ociCore.INSTANCE_LIFECYCLE_STATE_TERMINATED,
+					ociCore.InstanceLifecycleStateTerminated,
 					5*time.Minute)
 				if err != nil {
 					instIds = append(instIds, inst.Id())

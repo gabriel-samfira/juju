@@ -6,6 +6,7 @@ package oci
 import (
 	"context"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,7 +42,7 @@ var _ instance.InstanceFirewaller = (*ociInstance)(nil)
 
 // newInstance returns a new oracleInstance
 func newInstance(raw ociCore.Instance, env *Environ) (*ociInstance, error) {
-	if raw.ID == nil {
+	if raw.Id == nil {
 		return nil, errors.New(
 			"Instance response does not contain an ID",
 		)
@@ -53,7 +54,7 @@ func newInstance(raw ociCore.Instance, env *Environ) (*ociInstance, error) {
 		mutex: mutex,
 		env:   env,
 		arch:  &arch,
-		ocid:  *raw.ID,
+		ocid:  *raw.Id,
 	}
 
 	return instance, nil
@@ -65,34 +66,34 @@ func (o *ociInstance) availabilityZone() string {
 
 // Id implements instance.Instance
 func (o *ociInstance) Id() instance.Id {
-	if o.raw.ID == nil {
+	if o.raw.Id == nil {
 		return ""
 	}
-	return instance.Id(*o.raw.ID)
+	return instance.Id(*o.raw.Id)
 }
 
 // Status implements instance.Instance
 func (o *ociInstance) Status() instance.InstanceStatus {
-	if o.raw.ID == nil {
+	if o.raw.Id == nil {
 		if err := o.refresh(); err != nil {
 			return instance.InstanceStatus{}
 		}
 	}
 	return instance.InstanceStatus{
 		Status:  status.Status(o.raw.LifecycleState),
-		Message: "",
+		Message: strings.ToLower(string(o.raw.LifecycleState)),
 	}
 }
 
 // Addresses implements instance.Instance
 func (o *ociInstance) Addresses() ([]network.Address, error) {
-	addresses, err := o.env.cli.GetInstanceAddresses(o.Id(), o.raw.CompartmentID)
+	addresses, err := o.env.cli.GetInstanceAddresses(o.Id(), o.raw.CompartmentId)
 	return addresses, err
 }
 
 func (o *ociInstance) isTerminating() bool {
-	terminatedStatus := ociCore.INSTANCE_LIFECYCLE_STATE_TERMINATED
-	terminatingStatus := ociCore.INSTANCE_LIFECYCLE_STATE_TERMINATING
+	terminatedStatus := ociCore.InstanceLifecycleStateTerminated
+	terminatingStatus := ociCore.InstanceLifecycleStateTerminating
 	if o.raw.LifecycleState == terminatedStatus || o.raw.LifecycleState == terminatingStatus {
 		return true
 	}
@@ -121,7 +122,7 @@ func (o *ociInstance) waitForPublicIP() error {
 		iteration++
 		continue
 	}
-	return errors.NotFoundf("failed to find public IP for instance: %s", o.raw.ID)
+	return errors.NotFoundf("failed to find public IP for instance: %s", o.raw.Id)
 }
 
 func (o *ociInstance) deleteInstance() error {
@@ -134,11 +135,11 @@ func (o *ociInstance) deleteInstance() error {
 		return nil
 	}
 	request := ociCore.TerminateInstanceRequest{
-		InstanceID: &o.ocid,
+		InstanceId: &o.ocid,
 		IfMatch:    o.etag,
 	}
-	err = o.env.cli.TerminateInstance(context.Background(), request)
-	if err != nil {
+	response, err := o.env.cli.TerminateInstance(context.Background(), request)
+	if err != nil && !o.env.isNotFound(response.RawResponse) {
 		return err
 	}
 	iteration := 0
@@ -153,7 +154,7 @@ func (o *ociInstance) deleteInstance() error {
 		if o.isTerminating() {
 			break
 		}
-		if iteration >= 30 && o.raw.LifecycleState == ociCore.INSTANCE_LIFECYCLE_STATE_RUNNING {
+		if iteration >= 30 && o.raw.LifecycleState == ociCore.InstanceLifecycleStateRunning {
 			logger.Warningf("Instance still in running state after %v checks. breaking loop", iteration)
 			break
 		}
@@ -225,7 +226,7 @@ func (o *ociInstance) refresh() error {
 	o.mutex.Lock()
 	defer o.mutex.Unlock()
 	request := ociCore.GetInstanceRequest{
-		InstanceID: &o.ocid,
+		InstanceId: &o.ocid,
 	}
 	response, err := o.env.cli.GetInstance(context.Background(), request)
 	if err != nil {

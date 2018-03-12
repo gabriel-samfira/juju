@@ -254,8 +254,8 @@ type InstanceImage struct {
 	// Raw stores the core.Image object
 	Raw ociCore.Image
 
-	// CompartmentID is the compartment Id where this image is available
-	CompartmentID *string
+	// CompartmentId is the compartment Id where this image is available
+	CompartmentId *string
 
 	// InstanceTypes holds a list of shapes compatible with this image
 	InstanceTypes []instances.InstanceType
@@ -383,7 +383,7 @@ func getCentOSSeries(img ociCore.Image) (string, error) {
 
 	// call series.CentOSVersionSeries to validate that the version
 	// of CentOS is supported by juju
-	logger.Warningf("Determining CentOS series for: %s", tmpVersion)
+	logger.Tracef("Determining CentOS series for: %s", tmpVersion)
 	return series.CentOSVersionSeries(tmpVersion)
 }
 
@@ -392,12 +392,12 @@ func NewInstanceImage(img ociCore.Image, compartmentID *string) (imgType Instanc
 	switch osVersion := *img.OperatingSystem; osVersion {
 	case windowsOS:
 		tmp := fmt.Sprintf("%s %s", *img.OperatingSystem, *img.OperatingSystemVersion)
-		logger.Warningf("Determining Windows series for: %s", tmp)
+		logger.Tracef("Determining Windows series for: %s", tmp)
 		imgSeries, err = series.WindowsVersionSeries(tmp)
 	case centOS:
 		imgSeries, err = getCentOSSeries(img)
 	case ubuntuOS:
-		logger.Warningf("Determining Ubuntu series for: %s", *img.OperatingSystemVersion)
+		logger.Tracef("Determining Ubuntu series for: %s", *img.OperatingSystemVersion)
 		imgSeries, err = series.VersionSeries(*img.OperatingSystemVersion)
 	default:
 		return imgType, errors.NotSupportedf("os %s is not supported", osVersion)
@@ -408,10 +408,10 @@ func NewInstanceImage(img ociCore.Image, compartmentID *string) (imgType Instanc
 	}
 
 	imgType.ImageType = getImageType(img)
-	imgType.Id = *img.ID
+	imgType.Id = *img.Id
 	imgType.Series = imgSeries
 	imgType.Raw = img
-	imgType.CompartmentID = compartmentID
+	imgType.CompartmentId = compartmentID
 
 	version, err := NewImageVersion(img)
 	if err != nil {
@@ -428,8 +428,8 @@ func instanceTypes(cli common.ApiClient, compartmentID, imageID *string) ([]inst
 	}
 
 	request := ociCore.ListShapesRequest{
-		CompartmentID: compartmentID,
-		ImageID:       imageID,
+		CompartmentId: compartmentID,
+		ImageId:       imageID,
 	}
 	// fetch all shapes from the provider
 	shapes, err := cli.ListShapes(context.Background(), request)
@@ -443,7 +443,7 @@ func instanceTypes(cli common.ApiClient, compartmentID, imageID *string) ([]inst
 	for key, val := range shapes.Items {
 		spec, ok := shapeSpecs[*val.Shape]
 		if !ok {
-			logger.Warningf("shape %s does not have a mapping", *val.Shape)
+			logger.Debugf("shape %s does not have a mapping", *val.Shape)
 			continue
 		}
 		instanceType := string(spec.Type)
@@ -471,7 +471,7 @@ func refreshImageCache(cli common.ApiClient, compartmentID *string) (*imageCache
 	}
 
 	request := ociCore.ListImagesRequest{
-		CompartmentID: compartmentID,
+		CompartmentId: compartmentID,
 	}
 	response, err := cli.ListImages(context.Background(), request)
 	if err != nil {
@@ -481,7 +481,7 @@ func refreshImageCache(cli common.ApiClient, compartmentID *string) (*imageCache
 	images := []InstanceImage{}
 
 	for _, val := range response.Items {
-		instTypes, err := instanceTypes(cli, compartmentID, val.ID)
+		instTypes, err := instanceTypes(cli, compartmentID, val.Id)
 		if err != nil {
 			return nil, err
 		}
