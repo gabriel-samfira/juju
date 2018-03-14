@@ -16,15 +16,11 @@ import (
 	"github.com/juju/utils/clock"
 	"gopkg.in/juju/environschema.v1"
 
-	// "github.com/juju/utils/clock"
-
 	"github.com/juju/juju/cloud"
 	"github.com/juju/juju/environs"
 	"github.com/juju/juju/environs/config"
 	"github.com/juju/juju/instance"
 	providerCommon "github.com/juju/juju/provider/oci/common"
-	// providerNet "github.com/juju/juju/provider/oci/network"
-	// ociNet "github.com/juju/juju/provider/oci/network"
 
 	"gopkg.in/ini.v1"
 )
@@ -42,17 +38,6 @@ var cloudSchema = &jsonschema.Schema{
 			Plural:   "regions",
 			AdditionalProperties: &jsonschema.Schema{
 				Type: []jsonschema.Type{jsonschema.ObjectType},
-				// Required:      []string{cloud.EndpointKey},
-				// MaxProperties: jsonschema.Int(1),
-				// Properties: map[string]*jsonschema.Schema{
-				//     cloud.EndpointKey: &jsonschema.Schema{
-				//         Singular:      "the API endpoint url for the region",
-				//         Type:          []jsonschema.Type{jsonschema.StringType},
-				//         Format:        jsonschema.FormatURI,
-				//         Default:       "",
-				//         PromptDefault: "use cloud api url",
-				//     },
-				// },
 			},
 		},
 		cloud.AuthTypesKey: {
@@ -229,21 +214,11 @@ func (e *EnvironProvider) Open(params environs.OpenParams) (environs.Environ, er
 		return nil, errors.Trace(err)
 	}
 
-	// firewaller, err := providerNet.NewFirewaller(client)
-	// if err != nil {
-	// 	return nil, errors.Trace(err)
-	// }
-
 	env := &Environ{
 		cli:   client,
 		p:     e,
 		clock: clock.WallClock,
 	}
-
-	// netEnviron, err := providerNet.NewNetworkEnviron(client, env)
-	// if err != nil {
-	// 	return nil, errors.Trace(err)
-	// }
 
 	if err := env.SetConfig(params.Config); err != nil {
 		return nil, err

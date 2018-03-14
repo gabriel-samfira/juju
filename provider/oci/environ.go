@@ -376,7 +376,7 @@ func (e *Environ) DestroyController(controllerUUID string) error {
 	if err != nil {
 		return err
 	}
-	logger.Warningf("Cleaning up network resources")
+	logger.Debugf("Cleaning up network resources")
 	return e.cleanupNetworksAndSubnets(controllerUUID)
 }
 
@@ -461,10 +461,7 @@ func (e *Environ) StartInstance(args environs.StartInstanceParams) (*environs.St
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	logger.Warningf("Image cache contains: %v", imgCache)
-	// TODO(gsamfira): implement imageCache filter by series, and other attributes
-	// TODO(gsamfira): generate []ImageMetadata from filtered images
-	// TODO(gsamfira): get []InstanceType for filtered images
+	logger.Debugf("Image cache contains: %v", imgCache)
 	series := args.Tools.OneSeries()
 	arches := args.Tools.Arches()
 
