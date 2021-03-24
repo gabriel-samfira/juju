@@ -152,6 +152,7 @@ func (s *clientSuite) TestCreateVirtualMachine(c *gc.C) {
 		{"CreatePropertyCollector", nil},
 		{"CreateFilter", nil},
 		{"WaitForUpdatesEx", nil},
+		retrievePropertiesStubCall("FakeVm1"),
 		{"PowerOnVM_Task", nil},
 		{"CreatePropertyCollector", nil},
 		{"CreateFilter", nil},
@@ -459,7 +460,7 @@ func (s *clientSuite) TestCreateVirtualMachineRootDiskSize(c *gc.C) {
 	_, err := client.CreateVirtualMachine(context.Background(), args)
 	c.Assert(err, jc.ErrorIsNil)
 
-	s.roundTripper.CheckCall(c, 42, "ReconfigVM_Task", types.VirtualMachineConfigSpec{
+	s.roundTripper.CheckCall(c, 43, "ReconfigVM_Task", types.VirtualMachineConfigSpec{
 		DeviceChange: []types.BaseVirtualDeviceConfigSpec{
 			&types.VirtualDeviceConfigSpec{
 				Operation:     types.VirtualDeviceConfigSpecOperationEdit,

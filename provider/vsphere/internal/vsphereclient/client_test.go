@@ -292,6 +292,7 @@ func (s *clientSuite) SetUpTest(c *gc.C) {
 			PropSet: []types.DynamicProperty{
 				{Name: "name", Val: "juju-vm-0"},
 				{Name: "runtime.powerState", Val: "poweredOff"},
+				{Name: "config.version", Val: "vmx-10"},
 				{
 					Name: "config.hardware.device",
 					Val: []types.BaseVirtualDevice{
@@ -384,6 +385,7 @@ func (s *clientSuite) SetUpTest(c *gc.C) {
 			PropSet: []types.DynamicProperty{
 				{Name: "name", Val: "juju-vm-1"},
 				{Name: "runtime.powerState", Val: "poweredOn"},
+				{Name: "config.version", Val: "vmx-10"},
 				{
 					Name: "config.hardware.device",
 					Val: []types.BaseVirtualDevice{
@@ -416,6 +418,7 @@ func (s *clientSuite) SetUpTest(c *gc.C) {
 			PropSet: []types.DynamicProperty{
 				{Name: "name", Val: "juju-vm-template"},
 				{Name: "runtime.powerState", Val: "poweredOff"},
+				{Name: "config.version", Val: "vmx-10"},
 				{
 					Name: "config.hardware.device",
 					Val: []types.BaseVirtualDevice{

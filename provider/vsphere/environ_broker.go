@@ -230,6 +230,7 @@ func (env *sessionEnviron) newRawInstance(
 		UpdateProgressInterval: updateProgressInterval,
 		Clock:                  clock.WallClock,
 		EnableDiskUUID:         env.ecfg.enableDiskUUID(),
+		ForceVMHardwareVersion: env.ecfg.forceVMHardwareVersion(),
 		IsBootstrap:            args.InstanceConfig.Bootstrap != nil,
 	}
 
